@@ -1,0 +1,251 @@
+/**
+ * Database Service Layer
+ * Handles data persistence with graceful degradation
+ */
+
+const { isDBConnected } = require("./connection");
+const { Candle, MarketData, Signal, Trade, Cache } = require("./models");
+
+class DatabaseService {
+  constructor() {
+    this.symbol = "NIFTY50";
+  }
+
+  // ===== Candle Operations =====
+
+  async saveCandles(timeframe, candles) {
+    if (!isDBConnected()) return { saved: false, reason: "DB offline" };
+
+    try {
+      const candleData = candles.map((c) => ({
+        symbol: this.symbol,
+        timeframe,
+        time: new Date(c.time),
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume || 0,
+        metadata: c.metadata || {},
+      }));
+
+      const result = await Candle.bulkUpsertCandles(candleData);
+      return { saved: true, count: candleData.length };
+    } catch (err) {
+      console.error("[DB] Error saving candles:", err.message);
+      return { saved: false, error: err.message };
+    }
+  }
+
+  async getCandles(timeframe, startDate, endDate) {
+    if (!isDBConnected()) return [];
+
+    try {
+      return await Candle.getCandlesInRange(
+        this.symbol,
+        timeframe,
+        startDate,
+        endDate,
+      );
+    } catch (err) {
+      console.error("[DB] Error loading candles:", err.message);
+      return [];
+    }
+  }
+
+  // ===== Market Data Operations =====
+
+  async saveMarketData(data) {
+    if (!isDBConnected()) return { saved: false, reason: "DB offline" };
+
+    try {
+      const marketData = {
+        symbol: this.symbol,
+        date: new Date(data.date || Date.now()),
+        previousDay: data.previousDay,
+        cpr: data.cpr,
+        supportResistance: data.supportResistance,
+        atr: data.atr,
+        bias: data.bias,
+      };
+
+      const result = await MarketData.upsertMarketData(marketData);
+      return { saved: true, data: result };
+    } catch (err) {
+      console.error("[DB] Error saving market data:", err.message);
+      return { saved: false, error: err.message };
+    }
+  }
+
+  async getLatestMarketData() {
+    if (!isDBConnected()) return null;
+
+    try {
+      return await MarketData.getLatest(this.symbol);
+    } catch (err) {
+      console.error("[DB] Error loading market data:", err.message);
+      return null;
+    }
+  }
+
+  // ===== Signal Operations =====
+
+  async saveSignal(signal, analysis, scoring) {
+    if (!isDBConnected()) return { saved: false, reason: "DB offline" };
+
+    try {
+      const signalData = new Signal({
+        symbol: this.symbol,
+        timestamp: new Date(signal.timestamp || Date.now()),
+        type: signal.type,
+        entry: signal.entry,
+        stopLoss: signal.stopLoss,
+        target: signal.target,
+        riskReward: signal.riskReward,
+        strikes: signal.strikes,
+        analysis: {
+          cpr: analysis.cpr,
+          supportResistance: analysis.supportResistance,
+          bias: analysis.bias,
+          narrowCPR: analysis.narrowCPR,
+          cprWidthType: analysis.cprWidthType,
+          amZone: analysis.amZone,
+          manipulation: analysis.manipulation,
+          strongCandle: analysis.strongCandle,
+          volumeSpike: analysis.volumeSpike,
+          mtfConfirmed: analysis.mtfConfirmed,
+          atr: analysis.atr,
+        },
+        scoring: scoring,
+        status: "GENERATED",
+      });
+
+      const result = await signalData.save();
+      return { saved: true, signalId: result._id };
+    } catch (err) {
+      console.error("[DB] Error saving signal:", err.message);
+      return { saved: false, error: err.message };
+    }
+  }
+
+  async getRecentSignals(limit = 10) {
+    if (!isDBConnected()) return [];
+
+    try {
+      return await Signal.find({ symbol: this.symbol })
+        .sort({ timestamp: -1 })
+        .limit(limit)
+        .lean();
+    } catch (err) {
+      console.error("[DB] Error loading signals:", err.message);
+      return [];
+    }
+  }
+
+  // ===== Trade Operations =====
+
+  async saveTrade(trade, signalId = null) {
+    if (!isDBConnected()) return { saved: false, reason: "DB offline" };
+
+    try {
+      const tradeData = new Trade({
+        symbol: this.symbol,
+        signalId,
+        type: trade.type,
+        entry: {
+          price: trade.entry,
+          time: new Date(trade.timestamp || Date.now()),
+        },
+        stopLoss: trade.stopLoss,
+        target: trade.target,
+        riskReward: trade.riskReward,
+        status: trade.status || "OPEN",
+        score: trade.score,
+        grade: trade.grade,
+        metadata: {
+          platform: "ANGELONE",
+          mode: "LIVE",
+        },
+      });
+
+      const result = await tradeData.save();
+      return { saved: true, tradeId: result._id };
+    } catch (err) {
+      console.error("[DB] Error saving trade:", err.message);
+      return { saved: false, error: err.message };
+    }
+  }
+
+  async updateTrade(tradeId, updates) {
+    if (!isDBConnected()) return { updated: false, reason: "DB offline" };
+
+    try {
+      const result = await Trade.findByIdAndUpdate(
+        tradeId,
+        { $set: updates },
+        { new: true },
+      );
+      return { updated: true, trade: result };
+    } catch (err) {
+      console.error("[DB] Error updating trade:", err.message);
+      return { updated: false, error: err.message };
+    }
+  }
+
+  async getTradeStats() {
+    if (!isDBConnected()) return null;
+
+    try {
+      return await Trade.getStats({ symbol: this.symbol });
+    } catch (err) {
+      console.error("[DB] Error loading trade stats:", err.message);
+      return null;
+    }
+  }
+
+  async getRecentTrades(limit = 20) {
+    if (!isDBConnected()) return [];
+
+    try {
+      return await Trade.find({ symbol: this.symbol })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean();
+    } catch (err) {
+      console.error("[DB] Error loading trades:", err.message);
+      return [];
+    }
+  }
+
+  // ===== Cache Operations =====
+
+  async cacheFullState(state) {
+    if (!isDBConnected()) return { cached: false, reason: "DB offline" };
+
+    try {
+      await Cache.setCache(
+        `${this.symbol}:full_state`,
+        "FULL_STATE",
+        state,
+        3600, // 1 hour TTL
+      );
+      return { cached: true };
+    } catch (err) {
+      console.error("[DB] Error caching state:", err.message);
+      return { cached: false, error: err.message };
+    }
+  }
+
+  async getCachedState() {
+    if (!isDBConnected()) return null;
+
+    try {
+      return await Cache.getCache(`${this.symbol}:full_state`);
+    } catch (err) {
+      console.error("[DB] Error loading cached state:", err.message);
+      return null;
+    }
+  }
+}
+
+module.exports = new DatabaseService();
