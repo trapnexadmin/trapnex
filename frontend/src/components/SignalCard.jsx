@@ -32,10 +32,12 @@ export default function SignalCard({ signal, scoring }) {
                 ? 'bg-brand-green/15 text-brand-green border border-brand-green/30'
                 : scoring.grade === 'A'
                 ? 'bg-brand-blue/15 text-brand-blue border border-brand-blue/30'
+                : scoring.grade === 'B+' || scoring.grade === 'B'
+                ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
                 : 'bg-white/10 text-brand-muted border border-white/10'
             }`}
           >
-            {scoring.grade} ({scoring.score}/10)
+            {scoring.grade} ({scoring.score}/{scoring.maxScore || 20})
           </span>
         )}
       </div>

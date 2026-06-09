@@ -91,9 +91,24 @@ class DatabaseService {
   // ===== Signal Operations =====
 
   async saveSignal(signal, analysis, scoring) {
-    if (!isDBConnected()) return { saved: false, reason: "DB offline" };
+    if (!isDBConnected()) {
+      console.log("[DB] Cannot save signal - DB offline");
+      return { saved: false, reason: "DB offline" };
+    }
+
+    if (!signal || !analysis) {
+      console.log("[DB] Cannot save signal - missing signal or analysis");
+      return { saved: false, reason: "Missing signal or analysis data" };
+    }
 
     try {
+      console.log("[DB] Saving signal:", {
+        type: signal.type,
+        entry: signal.entry,
+        source: signal.source,
+        grade: scoring?.grade,
+      });
+
       const signalData = new Signal({
         symbol: this.symbol,
         timestamp: new Date(signal.timestamp || Date.now()),
@@ -102,28 +117,30 @@ class DatabaseService {
         stopLoss: signal.stopLoss,
         target: signal.target,
         riskReward: signal.riskReward,
-        strikes: signal.strikes,
+        strikes: signal.strikes || {},
         analysis: {
-          cpr: analysis.cpr,
-          supportResistance: analysis.supportResistance,
-          bias: analysis.bias,
-          narrowCPR: analysis.narrowCPR,
-          cprWidthType: analysis.cprWidthType,
-          amZone: analysis.amZone,
-          manipulation: analysis.manipulation,
-          strongCandle: analysis.strongCandle,
-          volumeSpike: analysis.volumeSpike,
-          mtfConfirmed: analysis.mtfConfirmed,
-          atr: analysis.atr,
+          cpr: analysis.cpr || {},
+          supportResistance: analysis.supportResistance || {},
+          bias: analysis.bias || "NEUTRAL",
+          narrowCPR: analysis.narrowCPR || false,
+          cprWidthType: analysis.cprWidthType || "MODERATE",
+          amZone: analysis.amZone || null,
+          manipulation: analysis.manipulation || null,
+          strongCandle: analysis.strongCandle || null,
+          volumeSpike: analysis.volumeSpike || false,
+          mtfConfirmed: analysis.mtfConfirmed || false,
+          atr: analysis.atr || 0,
         },
-        scoring: scoring,
+        scoring: scoring || {},
         status: "GENERATED",
       });
 
       const result = await signalData.save();
+      console.log("[DB] ✓ Signal saved successfully:", result._id);
       return { saved: true, signalId: result._id };
     } catch (err) {
-      console.error("[DB] Error saving signal:", err.message);
+      console.error("[DB] ✗ Error saving signal:", err.message);
+      console.error("[DB] Error details:", err);
       return { saved: false, error: err.message };
     }
   }
@@ -214,6 +231,31 @@ class DatabaseService {
     } catch (err) {
       console.error("[DB] Error loading trades:", err.message);
       return [];
+    }
+  }
+
+  async getTradesWithFilter(filter, limit = 50) {
+    if (!isDBConnected()) return [];
+
+    try {
+      return await Trade.find({ symbol: this.symbol, ...filter })
+        .sort({ 'entry.time': -1 })
+        .limit(limit)
+        .lean();
+    } catch (err) {
+      console.error("[DB] Error loading filtered trades:", err.message);
+      return [];
+    }
+  }
+
+  async getTradeStatsWithFilter(filter) {
+    if (!isDBConnected()) return null;
+
+    try {
+      return await Trade.getStats({ symbol: this.symbol, ...filter });
+    } catch (err) {
+      console.error("[DB] Error loading filtered trade stats:", err.message);
+      return null;
     }
   }
 

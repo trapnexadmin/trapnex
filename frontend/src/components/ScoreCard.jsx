@@ -15,6 +15,7 @@ export default function ScoreCard({ scoring }) {
   const gradeColor = {
     'A+': 'text-brand-green',
     A: 'text-brand-blue',
+    'B+': 'text-cyan-400',
     B: 'text-yellow-400',
     C: 'text-brand-muted',
   }[scoring.grade] || 'text-brand-muted';
@@ -22,6 +23,7 @@ export default function ScoreCard({ scoring }) {
   const gradeGlow = {
     'A+': 'glow-green',
     A: 'glow-blue',
+    'B+': 'glow-cyan',
   }[scoring.grade] || '';
 
   return (
@@ -36,7 +38,7 @@ export default function ScoreCard({ scoring }) {
           {scoring.grade}
         </div>
         <div className="text-sm text-brand-muted mt-1">
-          {scoring.score} / 10
+          {scoring.score} / {scoring.maxScore || 20}
         </div>
       </div>
 
@@ -45,7 +47,7 @@ export default function ScoreCard({ scoring }) {
         <div
           className="h-full rounded-full transition-all duration-700 ease-out"
           style={{
-            width: `${(scoring.score / 10) * 100}%`,
+            width: `${Math.min(100, (scoring.score / (scoring.maxScore || 20)) * 100)}%`,
             background: `linear-gradient(90deg, #22FF88, #3B82F6)`,
           }}
         />
@@ -70,7 +72,9 @@ export default function ScoreCard({ scoring }) {
             scoring.tradeable ? 'text-brand-green' : 'text-brand-muted'
           }`}
         >
-          {scoring.tradeable ? '✓ TRADEABLE — A+ Setup' : 'Waiting for A+ setup...'}
+          {scoring.tradeable 
+            ? `✓ TRADEABLE — ${scoring.grade} Setup` 
+            : `Waiting for better setup... (${scoring.grade})`}
         </span>
       </div>
     </div>

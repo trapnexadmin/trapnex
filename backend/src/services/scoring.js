@@ -3,11 +3,11 @@
  * Maximum Score: 20+ points
  * 
  * Grade System:
- * A+ (14+): Auto-execute, Retest confirmed, Not inside CPR
- * A (11-13): Show signal
- * B+ (8-10): Watchlist
- * B (6-7): Low confidence
- * <6: Ignore
+ * A+ (14+): Auto-execute (if retest confirmed & not inside CPR)
+ * A (11-13): Tradeable signal
+ * B+ (8-10): Tradeable (manual confirmation recommended)
+ * B (6-7): Watchlist (alerts only, can upgrade to B+)
+ * C (<6): Ignore (wait for better setup)
  */
 
 /**
@@ -214,13 +214,13 @@ function scoreMarketStructure({
     tradeable = true;
   } else if (score >= 8) {
     grade = 'B+';
-    tradeable = false; // Watchlist only
+    tradeable = true; // B+ is now tradeable! (Manual confirmation recommended)
   } else if (score >= 6) {
     grade = 'B';
-    tradeable = false;
+    tradeable = false; // Watchlist - can upgrade to B+
   } else {
     grade = 'C';
-    tradeable = false;
+    tradeable = false; // Ignore - wait for better setup
   }
 
   return {

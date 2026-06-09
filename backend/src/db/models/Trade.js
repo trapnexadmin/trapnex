@@ -100,14 +100,15 @@ tradeSchema.statics.getStats = async function(filter = {}) {
   const maxLoss = Math.min(...trades.map(t => t.pnl.points || 0));
 
   return {
-    total: trades.length,
-    winners,
-    losers,
+    totalTrades: trades.length,
+    wins: winners,
+    losses: losers,
     winRate: (winners / trades.length) * 100,
     totalPnL,
     avgPnL: totalPnL / trades.length,
-    maxProfit,
-    maxLoss,
+    bestTrade: maxProfit,
+    worstTrade: maxLoss,
+    maxDrawdown: Math.abs(maxLoss),
   };
 };
 

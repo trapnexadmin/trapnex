@@ -4,12 +4,12 @@
  *
  * DO NOT trade breakouts blindly.
  * WAIT FOR: Break → Retest → Rejection → Confirmation → Entry
- * 
+ *
  * TIMEFRAME STRATEGY:
  * - 3m candles: Primary analysis (faster signals, quicker decisions)
  * - 5m candles: AM detection (needs longer lookback for accumulation zones)
  * - 15m candles: Trend confirmation (ensures directional alignment)
- * 
+ *
  * Benefits of 3m primary:
  * - Faster signal generation (2x faster than 5m)
  * - Earlier detection of breakout + retest
@@ -74,8 +74,78 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         const type = retestDetected.direction === "BULLISH" ? "CALL" : "PUT";
         const levelPrice = retestDetected.price;
 
+        // Calculate proper scoring for breakout + retest pattern
+        let earlyScore = 0;
+        const earlyBreakdown = {};
+
+        // Base score for market structure
+        if (breakoutDetected) {
+          earlyScore += 1;
+          earlyBreakdown.breakout = "✓ Detected (+1)";
+        }
+        if (retestDetected) {
+          earlyScore += 3; // Retest is the key pattern
+          earlyBreakdown.retest = "✓ Active (+3)";
+        }
+
+        // CPR position scoring
+        if (bias === "BULLISH" && type === "CALL") {
+          earlyScore += 2;
+          earlyBreakdown.cprBias = "✓ Above CPR (+2)";
+        } else if (bias === "BEARISH" && type === "PUT") {
+          earlyScore += 2;
+          earlyBreakdown.cprBias = "✓ Below CPR (+2)";
+        }
+
+        // Candle strength bonus (based on last candle)
+        const lastCandleForEarly = candles3m[candles3m.length - 1];
+        const body = Math.abs(
+          lastCandleForEarly.close - lastCandleForEarly.open,
+        );
+        const range = lastCandleForEarly.high - lastCandleForEarly.low;
+        if (range > 0 && body / range > 0.6) {
+          earlyScore += 2;
+          earlyBreakdown.strongCandle = "✓ Strong body (+2)";
+        }
+
+        // Level importance
+        const levelNum = parseInt(
+          retestDetected.level.match(/\d+/)?.[0] || "0",
+        );
+        if (levelNum <= 2) {
+          earlyScore += 1.5;
+          earlyBreakdown.levelImportance = "✓ Major level (+1.5)";
+        } else if (levelNum <= 3) {
+          earlyScore += 1;
+          earlyBreakdown.levelImportance = "✓ Important level (+1)";
+        }
+
+        // Determine grade and tradeable status
+        let grade, tradeable, autoExecute, confidence;
+        if (earlyScore >= 11) {
+          grade = "A";
+          tradeable = true;
+          autoExecute = true;
+          confidence = 0.85;
+        } else if (earlyScore >= 8) {
+          grade = "B+";
+          tradeable = true; // B+ is now tradeable!
+          autoExecute = false; // Manual confirmation recommended
+          confidence = 0.75;
+        } else if (earlyScore >= 6) {
+          grade = "B";
+          tradeable = false; // Watchlist - can upgrade
+          autoExecute = false;
+          confidence = 0.65;
+        } else {
+          grade = "C";
+          tradeable = false;
+          autoExecute = false;
+          confidence = 0.5;
+        }
+
         console.log(
-          `[Strategy] 🔔 Breakout + Retest detected (${candles3m.length} candles): ${type} @ ${retestDetected.level}`,
+          `[Strategy] 🔔 Breakout + Retest detected (${candles3m.length} candles): ${type} @ ${retestDetected.level} | Score: ${earlyScore} (${grade}) | ${tradeable ? "TRADEABLE" : "WATCHLIST"}`,
         );
 
         signals.push({
@@ -96,17 +166,13 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           timestamp: Date.now(),
           source: "BREAKOUT_RETEST",
           level: retestDetected.level,
-          confidence: Math.min(0.6, candles3m.length / 10), // Lower confidence with fewer candles
-          score: Math.min(7, candles3m.length), // Scale score with candle count
-          grade: "C",
-          breakdown: {
-            breakout: breakoutDetected ? "✓ Detected" : "✗ None",
-            retest: "✓ Active",
-            candleCount: `${candles3m.length}/10`,
-          },
-          tradeable: candles3m.length >= 4, // Only tradeable with 4+ candles
-          autoExecute: false,
-          description: `${type} on ${retestDetected.level} retest (early signal - ${candles3m.length}/10 candles)`,
+          confidence,
+          score: earlyScore,
+          grade,
+          breakdown: earlyBreakdown,
+          tradeable,
+          autoExecute,
+          description: `${type} on ${retestDetected.level} retest (${grade} grade - ${tradeable ? "Ready to trade" : "Watchlist"})`,
         });
       }
     }
@@ -164,7 +230,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   const volumeConfirmation = hasVolumeConfirmation(lastCandle, candles3m);
 
   // === LEGACY AM DETECTION (uses 5m for longer lookback) ===
-  const amZone = candles5m && candles5m.length >= 8 ? detectAccumulation(candles5m) : null;
+  const amZone =
+    candles5m && candles5m.length >= 8 ? detectAccumulation(candles5m) : null;
   const manipulation = amZone ? detectManipulation(candles5m, amZone) : null;
 
   // === LEGACY VOLUME SPIKE (uses 3m candles) ===
@@ -215,14 +282,21 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   if (candles15m && candles15m.length >= 3) {
     const tf15Trend = getTrend(candles15m);
     const tf3Trend = getTrend(candles3m);
-    const tf5Trend = candles5m && candles5m.length >= 3 ? getTrend(candles5m) : tf3Trend;
-    
+    const tf5Trend =
+      candles5m && candles5m.length >= 3 ? getTrend(candles5m) : tf3Trend;
+
     // Require 3m to align with 15m, 5m as additional confirmation
-    mtfConfirmed = tf3Trend === tf15Trend && (tf5Trend === tf15Trend || !candles5m || candles5m.length < 3);
+    mtfConfirmed =
+      tf3Trend === tf15Trend &&
+      (tf5Trend === tf15Trend || !candles5m || candles5m.length < 3);
   }
 
   // === SIGNAL GENERATION ===
   let signals = [];
+
+  // Helper to find nearest level for fallback signal
+  const nearestResistance = levelInteraction?.nearestResistance || "R1";
+  const nearestSupport = levelInteraction?.nearestSupport || "S1";
 
   // **GOLDEN RULE**: Only generate signals on CONFIRMED RETESTS
   // DO NOT trade breakouts blindly
@@ -260,7 +334,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     });
   }
 
-  // Secondary signals: Retest detected but not yet confirmed (watchlist)
+  // Secondary signals: Retest detected but not yet confirmed
+  // Tradeable if score >= 8 (B+), otherwise watchlist (B) or ignore (C/D/F)
   if (retestDetected && !holdConfirmed && cprState.signalAllowed !== false) {
     const type = retestDetected.direction === "BULLISH" ? "CALL" : "PUT";
     const entry = lastPrice;
@@ -269,6 +344,13 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     const slMultiplier = type === "CALL" ? -1 : 1;
     const stopLoss = round(entry + slMultiplier * slDistance);
     const target = round(entry - slMultiplier * slDistance * 2.5);
+
+    // Determine tradeable status based on score
+    // B+ and above (score >= 8): tradeable
+    // B (score 6-7): watchlist only
+    // C and below (score < 6): ignore
+    const isTradeableScore = scoring.score >= 8;
+    const isWatchlistScore = scoring.score >= 6 && scoring.score < 8;
 
     signals.push({
       type,
@@ -284,7 +366,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       score: scoring.score,
       grade: scoring.grade,
       breakdown: scoring.breakdown,
-      tradeable: false, // Watchlist only - wait for confirmation
+      tradeable: isTradeableScore, // B+ and above are tradeable
       autoExecute: false,
       description: `${type} - ${retestDetected.level} retest pending confirmation`,
     });
@@ -328,6 +410,45 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         tradeable: scoring.tradeable,
       });
     }
+  }
+
+  // Fallback: Generate signal if score is B+ or above (≥8) even without specific pattern
+  // This ensures high-quality setups don't get missed
+  if (
+    signals.length === 0 &&
+    scoring.score >= 8 &&
+    bias !== "NEUTRAL" &&
+    cprState.signalAllowed !== false &&
+    mtfConfirmed
+  ) {
+    const type = bias === "BULLISH" ? "CALL" : "PUT";
+    const entry = lastPrice;
+    const slMultiplier = type === "CALL" ? -1 : 1;
+    const stopLoss = round(entry + slMultiplier * atr * 1.5);
+    const target = round(entry - slMultiplier * atr * 3.0);
+
+    console.log(
+      `[Strategy] 🎯 High Quality Setup: ${type} | Score: ${scoring.score} (${scoring.grade}) | ${scoring.tradeable ? "TRADEABLE" : "WATCHLIST"}`,
+    );
+
+    signals.push({
+      type,
+      entry: round(entry),
+      stopLoss,
+      target,
+      riskReward: round(Math.abs(target - entry) / Math.abs(stopLoss - entry)),
+      strikes: getStrikes(entry, type),
+      timestamp: Date.now(),
+      source: "HIGH_QUALITY_SETUP",
+      level: bias === "BULLISH" ? nearestResistance : nearestSupport,
+      confidence: scoring.score >= 11 ? 0.85 : 0.75,
+      score: scoring.score,
+      grade: scoring.grade,
+      breakdown: scoring.breakdown,
+      tradeable: scoring.tradeable,
+      autoExecute: scoring.autoExecute,
+      description: `${type} - High quality setup (${scoring.grade} grade)`,
+    });
   }
 
   // Clean up old tracking data

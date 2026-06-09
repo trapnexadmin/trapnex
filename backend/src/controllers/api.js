@@ -148,8 +148,17 @@ function createControllers(strategyRunner, journal) {
   // Get recent trades from database
   router.get('/db/trades', async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 20;
-      const trades = await dbService.getRecentTrades(limit);
+      const limit = parseInt(req.query.limit) || 50;
+      const { startDate, endDate } = req.query;
+      
+      const filter = {};
+      if (startDate || endDate) {
+        filter['entry.time'] = {};
+        if (startDate) filter['entry.time'].$gte = new Date(startDate);
+        if (endDate) filter['entry.time'].$lte = new Date(endDate);
+      }
+      
+      const trades = await dbService.getTradesWithFilter(filter, limit);
       res.json(trades);
     } catch (err) {
       res.status(500).json({ error: 'Failed to load trades from database' });
@@ -159,7 +168,16 @@ function createControllers(strategyRunner, journal) {
   // Get trade statistics
   router.get('/db/trades/stats', async (req, res) => {
     try {
-      const stats = await dbService.getTradeStats();
+      const { startDate, endDate } = req.query;
+      
+      const filter = {};
+      if (startDate || endDate) {
+        filter['entry.time'] = {};
+        if (startDate) filter['entry.time'].$gte = new Date(startDate);
+        if (endDate) filter['entry.time'].$lte = new Date(endDate);
+      }
+      
+      const stats = await dbService.getTradeStatsWithFilter(filter);
       res.json(stats || {});
     } catch (err) {
       res.status(500).json({ error: 'Failed to load trade stats' });
