@@ -260,7 +260,7 @@ class LevelRetestTracker {
 
     // Check active breakouts for retest
     for (let i = this.activeBreakouts.length - 1; i >= 0; i--) {
-      const breakout = this.activeBreakouts[i]; = 60 minutes on 3m
+      const breakout = this.activeBreakouts[i]; // 60 minutes on 3m
 
       // Skip if too old (more than 20 candles ago)
       if (candles.length - breakout.breakoutCandle > 20) {
