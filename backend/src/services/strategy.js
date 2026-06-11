@@ -55,7 +55,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   // Using 3m candles allows for faster signal generation
   if (!candles3m || candles3m.length < 5) {
     const lastPrice = candles3m?.[candles3m.length - 1]?.close || close;
-    const bias = getCPRBias(lastPrice, cpr);
+    const cprBias = getCPRBias(lastPrice, cpr);
 
     let signals = [];
 
@@ -71,6 +71,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
 
       // Generate signal if there's a clear retest after breakout
       if (retestDetected) {
+        // V3 FIX: Use breakout direction, not CPR bias
         const type = retestDetected.direction === "BULLISH" ? "CALL" : "PUT";
         const levelPrice = retestDetected.price;
 
@@ -88,13 +89,17 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           earlyBreakdown.retest = "✓ Active (+3)";
         }
 
-        // CPR position scoring
-        if (bias === "BULLISH" && type === "CALL") {
+        // V3 FIX: Check if breakout direction aligns with CPR bias
+        const biasAligned = (
+          (cprBias === "BULLISH" && type === "CALL") ||
+          (cprBias === "BEARISH" && type === "PUT")
+        );
+        
+        if (biasAligned) {
           earlyScore += 2;
-          earlyBreakdown.cprBias = "✓ Above CPR (+2)";
-        } else if (bias === "BEARISH" && type === "PUT") {
-          earlyScore += 2;
-          earlyBreakdown.cprBias = "✓ Below CPR (+2)";
+          earlyBreakdown.cprBias = `✓ Aligns with CPR (+2)`;
+        } else {
+          earlyBreakdown.cprBias = `⚠️ Opposite to CPR (0)`;
         }
 
         // Candle strength bonus (based on last candle)
@@ -145,7 +150,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         }
 
         console.log(
-          `[Strategy] 🔔 Breakout + Retest detected (${candles3m.length} candles): ${type} @ ${retestDetected.level} | Score: ${earlyScore} (${grade}) | ${tradeable ? "TRADEABLE" : "WATCHLIST"}`,
+          `[Strategy] 🔔 Breakout + Retest detected (${candles3m.length} candles): ${type} @ ${retestDetected.level} | Score: ${earlyScore} (${grade}) | ${tradeable ? "TRADEABLE" : "WATCHLIST"} | ${biasAligned ? "✓ CPR aligned" : "⚠️ Opposite CPR"}`,
         );
 
         signals.push({
@@ -184,7 +189,9 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     return {
       cpr,
       supportResistance,
-      bias,
+      bias: cprBias,
+      biasSource: 'CPR',
+      biasConflict: false,
       lastPrice,
       narrowCPR: false,
       cprWidthType: "MODERATE",
@@ -196,7 +203,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
 
   const lastPrice = candles3m[candles3m.length - 1].close;
   const lastCandle = candles3m[candles3m.length - 1];
-  const bias = getCPRBias(lastPrice, cpr);
+  const cprBias = getCPRBias(lastPrice, cpr);
 
   // Calculate ATR for narrow CPR check
   const atr = calculateATR(candles3m, 14);
@@ -219,6 +226,23 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   const retestDetected = retestTracker.detectRetest(candles3m, lastPrice);
 
   const holdConfirmed = retestTracker.confirmHold(candles3m, lastPrice);
+  
+  // === V3 FIX: DETECT PRICE STRUCTURE ===
+  const priceStructure = detectPriceStructure(candles3m);
+  
+  // === V3 FIX: DETERMINE DOMINANT BIAS ===
+  // Priority: 1) Breakout/Retest, 2) Price Structure, 3) CPR Bias
+  const dominantBiasResult = getDominantBias(breakoutDetected, retestDetected, priceStructure, cprBias);
+  const bias = dominantBiasResult.bias; // This becomes the primary bias
+  const biasSource = dominantBiasResult.source;
+  const biasConflict = dominantBiasResult.conflictDetected;
+  
+  // Log bias determination
+  if (biasConflict) {
+    console.log(`[Strategy] ⚠️ BIAS CONFLICT: Structure=${priceStructure?.direction} vs CPR=${cprBias} | Using: ${bias} (${biasSource})`);
+  } else if (biasSource !== 'CPR') {
+    console.log(`[Strategy] 🎯 Dominant Bias: ${bias} from ${biasSource} (confidence: ${(dominantBiasResult.confidence * 100).toFixed(0)}%)`);
+  }
 
   // 3. Enhanced Rejection Candle Detection
   const rejectionCandle = detectRejectionCandle(lastCandle);
@@ -247,7 +271,20 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     atr,
   );
 
-  // === V2 SCORING SYSTEM (20+ points) ===
+  // === MULTI-TIMEFRAME CONFIRMATION ===
+  // Check if 3m and 15m trends align for higher confidence
+  let mtfConfirmed = true;
+  if (candles15m && candles15m.length >= 3) {
+    const tf15Trend = getTrend(candles15m);
+    const tf3Trend = getTrend(candles3m);
+    const tf5Trend =
+      candles5m && candles5m.length >= 3 ? getTrend(candles5m) : tf3Trend;
+    mtfConfirmed =
+      tf3Trend === tf15Trend &&
+      (tf5Trend === tf15Trend || !candles5m || candles5m.length < 3);
+  }
+
+  // === V3 SCORING SYSTEM ===
   const scoring = scoreMarketStructure({
     // CPR State
     cprState,
@@ -274,22 +311,14 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       levelInteraction?.nearestSupport || levelInteraction?.nearestResistance
     ),
     levelImportance: getLevelImportance(levelInteraction),
+
+    // V3 Additions
+    cprSROverlap: detectCPRSROverlap(cpr, supportResistance),
+    mtfAligned: mtfConfirmed,
+    
+    // V3 FIX: Add price structure score
+    priceStructure: priceStructure?.score || 0,
   });
-
-  // === MULTI-TIMEFRAME CONFIRMATION ===
-  // Check if 3m and 15m trends align for higher confidence
-  let mtfConfirmed = true;
-  if (candles15m && candles15m.length >= 3) {
-    const tf15Trend = getTrend(candles15m);
-    const tf3Trend = getTrend(candles3m);
-    const tf5Trend =
-      candles5m && candles5m.length >= 3 ? getTrend(candles5m) : tf3Trend;
-
-    // Require 3m to align with 15m, 5m as additional confirmation
-    mtfConfirmed =
-      tf3Trend === tf15Trend &&
-      (tf5Trend === tf15Trend || !candles5m || candles5m.length < 3);
-  }
 
   // === SIGNAL GENERATION ===
   let signals = [];
@@ -298,157 +327,249 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   const nearestResistance = levelInteraction?.nearestResistance || "R1";
   const nearestSupport = levelInteraction?.nearestSupport || "S1";
 
-  // **GOLDEN RULE**: Only generate signals on CONFIRMED RETESTS
-  // DO NOT trade breakouts blindly
+  // === V3 FIXED-POINT TARGETS + STRUCTURE SL ===
+  // Grade-based fixed targets (NIFTY options points)
+  // A+: T1=25, T2=50, T3=75, T4=100, T5=120
+  // A:  T1=22, T2=44, T3=66, T4=88
+  // B+: T1=20, T2=40, T3=60
+  // Thursday (expiry): Max T2 only
+  function getTargetsForGrade(grade) {
+    const now = new Date();
+    const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+    const isThursday = istDate.getUTCDay() === 4; // Thursday = expiry day
 
-  if (holdConfirmed && cprState.signalAllowed !== false && mtfConfirmed) {
-    // HIGH QUALITY SETUP: Breakout → Retest → Hold Confirmed
-
-    const type = holdConfirmed.direction === "BULLISH" ? "CALL" : "PUT";
-    const entry = lastPrice;
-
-    // Calculate SL/Target based on confirmed retest level
-    const levelPrice = holdConfirmed.price;
-    const slDistance = Math.abs(entry - levelPrice) + atr * 0.5;
-    const slMultiplier = type === "CALL" ? -1 : 1;
-    const stopLoss = round(entry + slMultiplier * slDistance);
-    const target = round(entry - slMultiplier * slDistance * 2.5); // 2.5R target
-
-    signals.push({
-      type,
-      entry: round(entry),
-      stopLoss,
-      target,
-      riskReward: round(Math.abs(target - entry) / Math.abs(stopLoss - entry)),
-      strikes: getStrikes(entry, type),
-      timestamp: Date.now(),
-      source: "RETEST_CONFIRMED",
-      level: holdConfirmed.level,
-      confidence: 0.9,
-      score: scoring.score,
-      grade: scoring.grade,
-      breakdown: scoring.breakdown,
-      tradeable: scoring.tradeable,
-      autoExecute: scoring.autoExecute,
-      description: `${type} - ${holdConfirmed.level} retest confirmed`,
-    });
+    let targets;
+    if (grade === 'A+') {
+      targets = isThursday ? [25, 50] : [25, 50, 75, 100, 120];
+    } else if (grade === 'A') {
+      targets = isThursday ? [22, 44] : [22, 44, 66, 88];
+    } else {
+      // B+
+      targets = isThursday ? [20, 40] : [20, 40, 60];
+    }
+    return targets;
   }
 
-  // Secondary signals: Retest detected but not yet confirmed
-  // Tradeable if score >= 8 (B+), otherwise watchlist (B) or ignore (C/D/F)
-  if (retestDetected && !holdConfirmed && cprState.signalAllowed !== false) {
-    const type = retestDetected.direction === "BULLISH" ? "CALL" : "PUT";
-    const entry = lastPrice;
-    const levelPrice = retestDetected.price;
-    const slDistance = Math.abs(entry - levelPrice) + atr * 0.5;
-    const slMultiplier = type === "CALL" ? -1 : 1;
-    const stopLoss = round(entry + slMultiplier * slDistance);
-    const target = round(entry - slMultiplier * slDistance * 2.5);
+  // Structure SL: use retest level + buffer; floor with fixed SL per grade
+  function calculateStructureSL(type, entryPrice, levelPrice, grade, atr) {
+    const buffer = atr * 0.3;
+    let structureSL;
+    if (type === 'CALL') {
+      structureSL = round(Math.min(levelPrice, entryPrice) - buffer);
+    } else {
+      structureSL = round(Math.max(levelPrice, entryPrice) + buffer);
+    }
 
-    // Determine tradeable status based on score
-    // B+ and above (score >= 8): tradeable
-    // B (score 6-7): watchlist only
-    // C and below (score < 6): ignore
-    const isTradeableScore = scoring.score >= 8;
-    const isWatchlistScore = scoring.score >= 6 && scoring.score < 8;
+    // Fixed SL floor per grade
+    const fixedSLPts = grade === 'A+' ? 18 : grade === 'A' ? 16 : 14;
+    const fixedSL = type === 'CALL'
+      ? round(entryPrice - fixedSLPts)
+      : round(entryPrice + fixedSLPts);
 
-    signals.push({
-      type,
-      entry: round(entry),
-      stopLoss,
-      target,
-      riskReward: round(Math.abs(target - entry) / Math.abs(stopLoss - entry)),
-      strikes: getStrikes(entry, type),
-      timestamp: Date.now(),
-      source: "RETEST_PENDING",
-      level: retestDetected.level,
-      confidence: 0.75,
-      score: scoring.score,
-      grade: scoring.grade,
-      breakdown: scoring.breakdown,
-      tradeable: isTradeableScore, // B+ and above are tradeable
-      autoExecute: false,
-      description: `${type} - ${retestDetected.level} retest pending confirmation`,
-    });
-  }
-
-  // Legacy CPR + Manipulation signal (only if score is high enough)
-  if (
-    manipulation &&
-    bias !== "NEUTRAL" &&
-    mtfConfirmed &&
-    scoring.score >= 11
-  ) {
-    const type =
-      manipulation.direction === "BUY" && bias === "BULLISH"
-        ? "CALL"
-        : manipulation.direction === "SELL" && bias === "BEARISH"
-          ? "PUT"
-          : null;
-
-    if (type) {
-      const entry = lastPrice;
-      const slMultiplier = type === "CALL" ? -1 : 1;
-      const stopLoss = round(entry + slMultiplier * atr * 1.2);
-      const target = round(entry - slMultiplier * atr * 2.0);
-
-      signals.push({
-        type,
-        entry: round(entry),
-        stopLoss,
-        target,
-        riskReward: round(
-          Math.abs(target - entry) / Math.abs(stopLoss - entry),
-        ),
-        strikes: getStrikes(entry, type),
-        timestamp: Date.now(),
-        source: "CPR_AM_MANIPULATION",
-        confidence: 0.8,
-        score: scoring.score,
-        grade: scoring.grade,
-        breakdown: scoring.breakdown,
-        tradeable: scoring.tradeable,
-      });
+    // Use MAX distance (most protective)
+    if (type === 'CALL') {
+      return Math.min(structureSL, fixedSL); // lower of the two = wider SL for call
+    } else {
+      return Math.max(structureSL, fixedSL); // higher of the two = wider SL for put
     }
   }
 
-  // Fallback: Generate signal if score is B+ or above (≥8) even without specific pattern
-  // This ensures high-quality setups don't get missed
-  if (
-    signals.length === 0 &&
-    scoring.score >= 8 &&
-    bias !== "NEUTRAL" &&
-    cprState.signalAllowed !== false &&
-    mtfConfirmed
-  ) {
-    const type = bias === "BULLISH" ? "CALL" : "PUT";
-    const entry = lastPrice;
-    const slMultiplier = type === "CALL" ? -1 : 1;
-    const stopLoss = round(entry + slMultiplier * atr * 1.5);
-    const target = round(entry - slMultiplier * atr * 3.0);
+  // Build a V3 signal object
+  function buildV3Signal(type, entry, levelPrice, source, level, atr, scoringResult, isOpposite = false) {
+    let adjustedScoring = { ...scoringResult };
+    
+    // V3 FIX: Apply score penalty for opposite direction trades
+    if (isOpposite) {
+      const penalty = 4; // Reduce score by 4 points for opposite direction
+      adjustedScoring.score = Math.max(0, scoringResult.score - penalty);
+      adjustedScoring.breakdown = {
+        ...scoringResult.breakdown,
+        oppositeDirection: `⚠️ Opposite to structure (-${penalty})`
+      };
+      
+      // V3 STRICT: Recalculate grade based on new score (min 12 for B+)
+      if (adjustedScoring.score >= 16) {
+        adjustedScoring.grade = 'A+';
+        adjustedScoring.tradeable = true;
+        adjustedScoring.autoExecute = true;
+      } else if (adjustedScoring.score >= 13) {
+        adjustedScoring.grade = 'A';
+        adjustedScoring.tradeable = true;
+        adjustedScoring.autoExecute = false;
+      } else if (adjustedScoring.score >= 12) {
+        adjustedScoring.grade = 'B+';
+        adjustedScoring.tradeable = true;
+        adjustedScoring.autoExecute = false;
+      } else if (adjustedScoring.score >= 7) {
+        adjustedScoring.grade = 'B';
+        adjustedScoring.tradeable = false;
+        adjustedScoring.autoExecute = false;
+      } else {
+        adjustedScoring.grade = 'C';
+        adjustedScoring.tradeable = false;
+        adjustedScoring.autoExecute = false;
+      }
+      
+      console.log(`[Strategy] ⚠️ Opposite trade penalty: ${scoringResult.score} → ${adjustedScoring.score} (${scoringResult.grade} → ${adjustedScoring.grade})`);
+    }
+    
+    const grade = adjustedScoring.grade;
+    const targets = getTargetsForGrade(grade);
 
-    console.log(
-      `[Strategy] 🎯 High Quality Setup: ${type} | Score: ${scoring.score} (${scoring.grade}) | ${scoring.tradeable ? "TRADEABLE" : "WATCHLIST"}`,
-    );
+    const stopLoss = calculateStructureSL(type, entry, levelPrice, grade, atr);
+    const slDistance = Math.abs(entry - stopLoss);
 
-    signals.push({
+    // Primary target is T1 for conservative R:R display; targets[] has all levels
+    const primaryTarget = type === 'CALL'
+      ? round(entry + targets[targets.length - 1])
+      : round(entry - targets[targets.length - 1]);
+    const t1 = type === 'CALL'
+      ? round(entry + targets[0])
+      : round(entry - targets[0]);
+
+    const riskReward = slDistance > 0
+      ? round(Math.abs(primaryTarget - entry) / slDistance)
+      : 0;
+
+    return {
       type,
       entry: round(entry),
       stopLoss,
-      target,
-      riskReward: round(Math.abs(target - entry) / Math.abs(stopLoss - entry)),
+      target: primaryTarget,     // primary (last target)
+      t1,                         // first target for trailing
+      targets: targets.map(pt => type === 'CALL' ? round(entry + pt) : round(entry - pt)),
+      targetPoints: targets,      // e.g. [25, 50, 75, 100, 120]
+      riskReward,
       strikes: getStrikes(entry, type),
       timestamp: Date.now(),
-      source: "HIGH_QUALITY_SETUP",
-      level: bias === "BULLISH" ? nearestResistance : nearestSupport,
-      confidence: scoring.score >= 11 ? 0.85 : 0.75,
-      score: scoring.score,
-      grade: scoring.grade,
-      breakdown: scoring.breakdown,
-      tradeable: scoring.tradeable,
-      autoExecute: scoring.autoExecute,
-      description: `${type} - High quality setup (${scoring.grade} grade)`,
-    });
+      source,
+      level,
+      confidence: adjustedScoring.grade === 'A+' ? 0.9 : adjustedScoring.grade === 'A' ? 0.82 : 0.75,
+      score: adjustedScoring.score,
+      grade: adjustedScoring.grade,
+      breakdown: adjustedScoring.breakdown,
+      tradeable: adjustedScoring.tradeable,
+      autoExecute: adjustedScoring.autoExecute,
+      description: `${type} ${source} @ ${level || 'CPR'} | Grade ${grade} | SL:${targets[0]}pt T:${targets.join('/')}pt${isOpposite ? ' (OPPOSITE)' : ''}`,
+    };
+  }
+
+  // **V3 STRICT RULE**: Only generate signals on CONFIRMED STRUCTURE
+  // REQUIREMENT: Must have breakout → retest/consolidation → rejection → confirmation
+  // NO FALLBACK SIGNALS without proper market structure
+
+  // V3 STRICT: Check if inside CPR (block unless wide CPR)
+  const isInsideCPR = cprState?.state === 'INSIDE';
+  const isWideCPR = cpr.width > 50; // Wide CPR exception (50+ points)
+  const allowInsideCPR = isInsideCPR && isWideCPR;
+  
+  if (isInsideCPR && !isWideCPR) {
+    console.log(`[Strategy] ❌ BLOCKED: Inside CPR (width: ${round(cpr.width)}pts < 50pts) - No edge, waiting for breakout`);
+    // Don't generate any signals when inside narrow CPR
+    signals = [];
+  } else {
+    // V3 STRICT: All signals MUST have retest or hold confirmation
+    const hasProperStructure = retestDetected || holdConfirmed;
+    
+    if (!hasProperStructure) {
+      console.log(`[Strategy] ❌ BLOCKED: No proper structure detected - Waiting for breakout + retest + confirmation`);
+      signals = [];
+    } else {
+      if (allowInsideCPR) {
+        console.log(`[Strategy] ✅ Wide CPR detected (${round(cpr.width)}pts) - Inside CPR signals allowed`);
+      }
+
+      // Setup 1: Hold Confirmed (Highest Confidence) - STRICT: Score >= 12
+      if (holdConfirmed && scoring.score >= 12 && mtfConfirmed) {
+        const type = holdConfirmed.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = holdConfirmed.price;
+        
+        // V3 FIX: Validate rejection alignment
+        const rejectionAligned = validateRejectionAlignment(rejectionCandle, holdConfirmed.direction);
+        
+        if (rejectionAligned) {
+          console.log(`[Strategy] ✅ RETEST_CONFIRMED: ${type} @ ${holdConfirmed.level} | Score: ${scoring.score} | ${scoring.grade}`);
+          signals.push(buildV3Signal(type, entry, levelPrice, "RETEST_CONFIRMED", holdConfirmed.level, atr, scoring, false));
+        } else {
+          console.log(`[Strategy] ❌ BLOCKED: Rejection misaligned with ${holdConfirmed.direction} breakout`);
+        }
+      }
+
+      // Setup 2: Retest detected (STRICT: Score >= 12 for B+)
+      if (retestDetected && !holdConfirmed && scoring.score >= 12 && mtfConfirmed) {
+        const type = retestDetected.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = retestDetected.price;
+        
+        // V3 FIX: Validate rejection alignment
+        const rejectionAligned = validateRejectionAlignment(rejectionCandle, retestDetected.direction);
+        
+        if (rejectionAligned) {
+          console.log(`[Strategy] ✅ RETEST_PENDING: ${type} @ ${retestDetected.level} | Score: ${scoring.score} | ${scoring.grade}`);
+          const sig = buildV3Signal(type, entry, levelPrice, "RETEST_PENDING", retestDetected.level, atr, scoring, false);
+          sig.tradeable = scoring.score >= 12; // B+ requires 12+ now
+          sig.autoExecute = false;
+          signals.push(sig);
+        } else {
+          console.log(`[Strategy] ❌ BLOCKED: Rejection misaligned with ${retestDetected.direction} retest`);
+        }
+      }
+
+      // Setup 3: CPR Rejection Reversal (STRICT: Only with proper structure + score >= 12)
+      if (
+        hasProperStructure &&
+        (cprState?.state === 'REJECTION') &&
+        bias !== 'NEUTRAL' &&
+        scoring.score >= 12 &&
+        mtfConfirmed
+      ) {
+        const type = bias === 'BULLISH' ? 'CALL' : 'PUT';
+        const entry = lastPrice;
+        const levelPrice = type === 'CALL' ? cpr.bc : cpr.tc;
+        
+        // V3 FIX: Check if this is opposite to structure
+        const isOpposite = biasSource === 'CPR' && biasConflict;
+
+        console.log(`[Strategy] ✅ CPR_REJECTION: ${type} | Score: ${scoring.score} | ${scoring.grade}${isOpposite ? ' (OPPOSITE)' : ''}`);
+        const sig = buildV3Signal(type, entry, levelPrice, "CPR_REJECTION", "CPR", atr, scoring, isOpposite);
+        sig.confidence = 0.78;
+        if (!signals.find(s => s.type === type)) {
+          signals.push(sig);
+        }
+      }
+
+      // Setup 4: CPR + Manipulation (STRICT: Only with proper structure + A grade)
+      if (
+        hasProperStructure &&
+        manipulation &&
+        bias !== "NEUTRAL" &&
+        mtfConfirmed &&
+        scoring.score >= 13
+      ) {
+        const type =
+          manipulation.direction === "BUY" && bias === "BULLISH"
+            ? "CALL"
+            : manipulation.direction === "SELL" && bias === "BEARISH"
+              ? "PUT"
+              : null;
+
+        if (type && !signals.find(s => s.type === type && s.source === 'CPR_AM_MANIPULATION')) {
+          const entry = lastPrice;
+          const levelPrice = type === 'CALL' ? cpr.bc : cpr.tc;
+          
+          // V3 FIX: Check if opposite to structure
+          const isOpposite = biasSource !== 'CPR' && (
+            (type === 'CALL' && bias === 'BEARISH') ||
+            (type === 'PUT' && bias === 'BULLISH')
+          );
+          
+          console.log(`[Strategy] ✅ CPR_AM_MANIPULATION: ${type} | Score: ${scoring.score} | ${scoring.grade}${isOpposite ? ' (OPPOSITE)' : ''}`);
+          const sig = buildV3Signal(type, entry, levelPrice, "CPR_AM_MANIPULATION", "CPR", atr, scoring, isOpposite);
+          signals.push(sig);
+        }
+      }
+    }
   }
 
   // Clean up old tracking data
@@ -456,12 +577,31 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
 
   // Get active market structure opportunities
   const marketStructure = retestTracker.getActiveOpportunities();
+  const executableSignals = signals.filter((signal) => signal.tradeable);
+  const effectiveScoring = {
+    ...scoring,
+    tradeable: executableSignals.length > 0,
+    autoExecute: executableSignals.some((signal) => signal.autoExecute),
+    executionReady: executableSignals.length > 0,
+    executionReason:
+      executableSignals.length > 0
+        ? executableSignals[0].source
+        : isInsideCPR && !isWideCPR
+          ? 'BLOCKED_INSIDE_CPR'
+          : !(retestDetected || holdConfirmed)
+            ? 'WAITING_STRUCTURE_CONFIRMATION'
+            : scoring.score < 12
+              ? 'WAITING_SCORE_UPGRADE'
+              : 'WAITING_REJECTION_ALIGNMENT',
+  };
 
   return {
     // CPR Analysis
     cpr,
     supportResistance,
-    bias,
+    bias, // V3 FIX: Now uses dominant bias (breakout > structure > CPR)
+    biasSource, // V3 FIX: Where bias came from (RETEST/BREAKOUT/STRUCTURE/CPR)
+    biasConflict, // V3 FIX: True if structure conflicts with CPR
     narrowCPR,
     cprWidthType,
     cprWidthDesc,
@@ -477,6 +617,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     retestDetected,
     holdConfirmed,
     rejectionCandle,
+    priceStructure, // V3 FIX: Price structure detection
 
     // Candle & Volume
     strongCandle,
@@ -487,7 +628,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     levelInteraction,
 
     // Scoring
-    scoring, // V2 Score (20+ points)
+    scoring: effectiveScoring,
 
     // Multi-timeframe
     mtfConfirmed,
@@ -523,6 +664,124 @@ function getTrend(candles) {
   if (closes[2] > closes[0]) return "BULLISH";
   if (closes[2] < closes[0]) return "BEARISH";
   return "NEUTRAL";
+}
+
+/**
+ * V3 FIX: Detect dominant price structure (market direction)
+ * Checks for higher lows (bullish) or lower highs (bearish)
+ * This OVERRIDES CPR bias when there's clear structure
+ */
+function detectPriceStructure(candles) {
+  if (candles.length < 5) return null;
+  
+  const recent = candles.slice(-5);
+  const lows = recent.map(c => c.low);
+  const highs = recent.map(c => c.high);
+  
+  // Check for higher lows (bullish structure)
+  let higherLows = true;
+  for (let i = 1; i < lows.length; i++) {
+    if (lows[i] < lows[i-1]) {
+      higherLows = false;
+      break;
+    }
+  }
+  
+  // Check for lower highs (bearish structure)
+  let lowerHighs = true;
+  for (let i = 1; i < highs.length; i++) {
+    if (highs[i] > highs[i-1]) {
+      lowerHighs = false;
+      break;
+    }
+  }
+  
+  if (higherLows && !lowerHighs) {
+    return { direction: 'BULLISH', strength: 'STRONG', score: 2 };
+  } else if (lowerHighs && !higherLows) {
+    return { direction: 'BEARISH', strength: 'STRONG', score: 2 };
+  } else if (higherLows) {
+    return { direction: 'BULLISH', strength: 'WEAK', score: 1 };
+  } else if (lowerHighs) {
+    return { direction: 'BEARISH', strength: 'WEAK', score: 1 };
+  }
+  
+  return null;
+}
+
+/**
+ * V3 FIX: Determine dominant market bias
+ * Priority: 1) Active breakout/retest direction, 2) Price structure, 3) CPR bias
+ * @param {*} breakoutDetected - active breakout from retestTracker
+ * @param {*} retestDetected - active retest from retestTracker
+ * @param {*} priceStructure - detected price structure
+ * @param {*} cprBias - CPR-based bias
+ * @returns {object} - { bias, source, confidence, conflictDetected }
+ */
+function getDominantBias(breakoutDetected, retestDetected, priceStructure, cprBias) {
+  // Priority 1: Active breakout/retest (highest priority)
+  if (retestDetected && retestDetected.direction) {
+    return {
+      bias: retestDetected.direction === 'BULLISH' ? 'BULLISH' : 'BEARISH',
+      source: 'RETEST',
+      confidence: 0.9,
+      conflictDetected: false,
+    };
+  }
+  
+  if (breakoutDetected && breakoutDetected.direction) {
+    return {
+      bias: breakoutDetected.direction === 'BULLISH' ? 'BULLISH' : 'BEARISH',
+      source: 'BREAKOUT',
+      confidence: 0.85,
+      conflictDetected: false,
+    };
+  }
+  
+  // Priority 2: Price structure
+  if (priceStructure && priceStructure.strength === 'STRONG') {
+    // Check if structure conflicts with CPR bias
+    const structureBias = priceStructure.direction;
+    const conflictDetected = (
+      (structureBias === 'BULLISH' && cprBias === 'BEARISH') ||
+      (structureBias === 'BEARISH' && cprBias === 'BULLISH')
+    );
+    
+    return {
+      bias: structureBias,
+      source: 'STRUCTURE',
+      confidence: 0.75,
+      conflictDetected,
+    };
+  }
+  
+  // Priority 3: CPR bias (fallback)
+  return {
+    bias: cprBias,
+    source: 'CPR',
+    confidence: 0.65,
+    conflictDetected: false,
+  };
+}
+
+/**
+ * V3 FIX: Validate rejection candle aligns with market direction
+ * After a bullish breakout, we need bullish rejection (not bearish)
+ */
+function validateRejectionAlignment(rejectionCandle, expectedDirection) {
+  if (!rejectionCandle || !rejectionCandle.detected) return true;
+  
+  const rejectionType = rejectionCandle.type;
+  
+  if (expectedDirection === 'BULLISH') {
+    // For CALL: need bullish rejection (bounce from support)
+    return rejectionType === 'BULLISH' || rejectionType === 'HAMMER' || rejectionType === 'DOJI_BULLISH';
+  } else if (expectedDirection === 'BEARISH') {
+    // For PUT: need bearish rejection (rejection from resistance)
+    return rejectionType === 'BEARISH' || rejectionType === 'SHOOTING_STAR' || rejectionType === 'DOJI_BEARISH';
+  }
+  
+  return true; // No rejection detected, allow signal
 }
 
 /**
@@ -582,6 +841,22 @@ function calculateATR(candles, period = 14) {
 
 function round(val) {
   return Math.round(val * 100) / 100;
+}
+
+/**
+ * V3: Detect CPR + S/R overlap zone (strong confluence = +3 score)
+ * If R1 or S1 is within CPR range, it's a high-conviction zone
+ */
+function detectCPRSROverlap(cpr, sr) {
+  if (!cpr || !sr) return false;
+  const cprUpper = cpr.upper || cpr.tc;
+  const cprLower = cpr.lower || cpr.bc;
+  const buffer = cpr.width * 0.5;
+
+  const levels = [sr.R1, sr.R2, sr.S1, sr.S2].filter(Boolean);
+  return levels.some(
+    (price) => price >= cprLower - buffer && price <= cprUpper + buffer
+  );
 }
 
 module.exports = { analyzeSetup };

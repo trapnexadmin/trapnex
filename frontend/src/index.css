@@ -8,13 +8,57 @@
   box-sizing: border-box;
 }
 
+/* ============ DARK MODE (default) ============ */
 body {
   background: #0b0f1a;
   color: #e2e8f0;
   font-family: "Inter", system-ui, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
+  transition: background 0.2s, color 0.2s;
 }
+
+/* ============ LIGHT MODE ============ */
+body.light {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+body.light .glass {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+}
+
+body.light .text-brand-muted {
+  color: #64748b;
+}
+
+body.light .text-brand-text {
+  color: #1e293b;
+}
+
+body.light .bg-brand-card {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+body.light .bg-brand-card-hover {
+  background: rgba(241, 245, 249, 0.9);
+}
+
+body.light header.glass {
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+body.light ::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+body.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+
 
 /* Scrollbar */
 ::-webkit-scrollbar {

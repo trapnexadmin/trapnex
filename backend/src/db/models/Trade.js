@@ -29,20 +29,30 @@ const tradeSchema = new mongoose.Schema({
     time: Date,
     reason: {
       type: String,
-      enum: ['TARGET', 'STOP_LOSS', 'MANUAL', 'EOD'],
+      enum: ['TARGET', 'TARGET_HIT', 'STOP_LOSS', 'MANUAL', 'EOD', 'MARKET_CLOSED'],
     }
   },
   stopLoss: Number,
-  target: Number,
+  initialSL: Number,
+  target: Number,       // primary (last) target
+  t1: Number,           // first target
+  targets: [Number],    // all target levels array
+  targetPoints: [Number], // fixed points array e.g. [25, 50, 75]
+  targetsHit: [Number], // which target indices were hit
   riskReward: Number,
   pnl: {
-    points: Number,
-    amount: Number,
-    percentage: Number,
+    points: { type: Number, default: 0 },
+    amount:  { type: Number, default: 0 },
+    percentage: { type: Number, default: 0 },
   },
   quantity: {
     type: Number,
     default: 1,
+  },
+  result: {
+    type: String,
+    enum: ['WIN', 'LOSS', null],
+    default: null,
   },
   status: {
     type: String,
@@ -58,6 +68,7 @@ const tradeSchema = new mongoose.Schema({
   metadata: {
     platform: String,
     mode: String, // 'LIVE' or 'BACKTEST'
+    source: String,
   }
 }, {
   timestamps: true,
@@ -68,18 +79,10 @@ tradeSchema.index({ symbol: 1, createdAt: -1 });
 tradeSchema.index({ status: 1, createdAt: -1 });
 tradeSchema.index({ 'entry.time': -1 });
 
-// Virtual for calculating actual duration
-tradeSchema.virtual('actualDuration').get(function() {
-  if (this.exit.time && this.entry.time) {
-    return this.exit.time - this.entry.time;
-  }
-  return null;
-});
-
 // Static method to get trade statistics
 tradeSchema.statics.getStats = async function(filter = {}) {
   const trades = await this.find({ ...filter, status: 'CLOSED' }).lean();
-  
+
   if (trades.length === 0) {
     return {
       total: 0,
@@ -93,11 +96,11 @@ tradeSchema.statics.getStats = async function(filter = {}) {
     };
   }
 
-  const winners = trades.filter(t => t.pnl.points > 0).length;
-  const losers = trades.filter(t => t.pnl.points < 0).length;
-  const totalPnL = trades.reduce((sum, t) => sum + (t.pnl.points || 0), 0);
-  const maxProfit = Math.max(...trades.map(t => t.pnl.points || 0));
-  const maxLoss = Math.min(...trades.map(t => t.pnl.points || 0));
+  const winners = trades.filter(t => (t.pnl?.points || 0) > 0).length;
+  const losers = trades.filter(t => (t.pnl?.points || 0) < 0).length;
+  const totalPnL = trades.reduce((sum, t) => sum + (t.pnl?.points || 0), 0);
+  const maxProfit = Math.max(...trades.map(t => t.pnl?.points || 0));
+  const maxLoss = Math.min(...trades.map(t => t.pnl?.points || 0));
 
   return {
     totalTrades: trades.length,

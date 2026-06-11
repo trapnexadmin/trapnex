@@ -1,0 +1,20 @@
+Project: Trapnex
+
+Backend:
+Node.js
+Express
+MongoDB
+Websocket
+
+Frontend:
+React
+Vite
+
+Rules:
+- Do not create duplicate files.
+- Follow existing folder structure.
+- Use async/await.
+- Use Javascript & TypeScript standards.
+- Explain before large changes.
+- Do not edit .env files.
+- If you create a new API route, add it to the .rest file.

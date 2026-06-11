@@ -1,137 +1,151 @@
 /**
- * TRAPNEX V2 - Market Structure Scoring System
- * Maximum Score: 20+ points
- * 
- * Grade System:
- * A+ (14+): Auto-execute (if retest confirmed & not inside CPR)
- * A (11-13): Tradeable signal
- * B+ (8-10): Tradeable (manual confirmation recommended)
- * B (6-7): Watchlist (alerts only, can upgrade to B+)
- * C (<6): Ignore (wait for better setup)
+ * TRAPNEX V3 - Market Structure Scoring System
+ * Maximum Score: 22+ points
+ *
+ * Grade System (V3 STRICT):
+ * A+ (16+): Auto-execute (if retest confirmed)
+ * A  (13-15): Tradeable signal
+ * B+ (12-14): Tradeable (STRICT: requires proper structure)
+ * B  (7-11):  Watchlist (alerts only, can upgrade to B+)
+ * Ignore (<7): Skip
  */
 
 /**
- * V2 Market Structure Score
+ * V3 Market Structure Score
  * Combines all scoring factors with proper weightage
  */
 function scoreMarketStructure({
   // CPR State
   cprState,
   narrowCPR,
-  
+
   // AM Detection
   amDetected,
   manipulation,
-  
+
   // Market Structure (Core)
   breakoutDetected,
   retestDetected,
   holdConfirmed,
-  
+
   // Candle Analysis
   rejectionCandle,
   strongCandle,
-  
+
   // Volume
   volumeConfirmation,
-  
+
   // S/R Proximity
   nearLevel,
   levelImportance,
+
+  // V3 Additions
+  cprSROverlap, // CPR + S/R zone overlap (+3)
+  mtfAligned, // Multi-timeframe alignment (+2)
+  priceStructure = 0, // V3 FIX: Price structure score (+1-2)
 }) {
   let score = 0;
   const breakdown = [];
 
   // === CPR STATE SCORING ===
-  
+
   // Penalty: Inside CPR (-5)
-  if (cprState?.state === 'INSIDE') {
+  if (cprState?.state === "INSIDE") {
     score += cprState.score; // -5
-    breakdown.push({ 
-      factor: '⚠️ Inside CPR (No Edge)', 
+    breakdown.push({
+      factor: "⚠️ Inside CPR (No Edge)",
       points: -5,
       critical: true,
     });
   }
-  
-  // CPR Acceptance (+3)
-  if (cprState?.state === 'ACCEPTANCE') {
-    score += 3;
-    breakdown.push({ 
-      factor: 'CPR Acceptance Pattern', 
-      points: 3,
-      description: cprState.details?.description,
-    });
-  }
-  
-  // CPR Rejection (+3)
-  if (cprState?.state === 'REJECTION') {
-    score += 3;
-    breakdown.push({ 
-      factor: 'CPR Rejection Pattern', 
-      points: 3,
-      description: cprState.details?.description,
-    });
-  }
-  
-  // Above CPR (+2)
-  if (cprState?.state === 'ABOVE') {
+
+  // CPR Acceptance (+2) — price accepted inside CPR zone
+  if (cprState?.state === "ACCEPTANCE") {
     score += 2;
-    breakdown.push({ 
-      factor: 'Above CPR (Bullish Bias)', 
+    breakdown.push({
+      factor: "CPR Acceptance",
       points: 2,
+      description: cprState.details?.description,
     });
   }
-  
-  // Below CPR (+2)
-  if (cprState?.state === 'BELOW') {
+
+  // CPR Rejection (+2) — price rejected at CPR boundary (reversal setup)
+  if (cprState?.state === "REJECTION") {
     score += 2;
-    breakdown.push({ 
-      factor: 'Below CPR (Bearish Bias)', 
+    breakdown.push({
+      factor: "CPR Rejection",
+      points: 2,
+      description: cprState.details?.description,
+    });
+  }
+
+  // Above CPR (+2)
+  if (cprState?.state === "ABOVE") {
+    score += 2;
+    breakdown.push({
+      factor: "Above CPR (Bullish)",
       points: 2,
     });
   }
 
-  // === LEGACY CPR FACTORS ===
-  
+  // Below CPR (+2)
+  if (cprState?.state === "BELOW") {
+    score += 2;
+    breakdown.push({
+      factor: "Below CPR (Bearish)",
+      points: 2,
+    });
+  }
+
   // Narrow CPR (+2)
   if (narrowCPR) {
     score += 2;
-    breakdown.push({ factor: 'Narrow CPR', points: 2 });
+    breakdown.push({ factor: "Narrow CPR", points: 2 });
+  }
+
+  // === V3: CPR + S/R ZONE OVERLAP (+3) ===
+  // Most powerful zone: R1/S1 inside or at CPR
+  if (cprSROverlap) {
+    score += 3;
+    breakdown.push({
+      factor: "🔥 CPR+SR Confluence",
+      points: 3,
+      critical: true,
+    });
   }
 
   // === AM DETECTION ===
-  
+
   // AM Zone (+1.5)
   if (amDetected) {
     score += 1.5;
-    breakdown.push({ factor: 'AM Zone Detected', points: 1.5 });
+    breakdown.push({ factor: "AM Zone", points: 1.5 });
   }
 
   // Manipulation (+2)
   if (manipulation) {
     score += 2;
-    breakdown.push({ factor: 'Manipulation Pattern', points: 2 });
+    breakdown.push({ factor: "Manipulation", points: 2 });
   }
 
   // === MARKET STRUCTURE (CORE EDGE) ===
-  
+
   // Level Breakout (+1)
   if (breakoutDetected) {
     score += 1;
-    breakdown.push({ 
-      factor: '🔓 Level Breakout', 
+    breakdown.push({
+      factor: "🔓 Breakout",
       points: 1,
       description: breakoutDetected.description,
     });
   }
 
-  // Retest Success (+2)
+  // Retest Success (+3) — upgraded from +2 in V3
   if (retestDetected) {
-    score += 2;
-    breakdown.push({ 
-      factor: '🎯 Retest Success', 
-      points: 2,
+    score += 3;
+    breakdown.push({
+      factor: "🎯 Retest",
+      points: 3,
       critical: true,
       description: retestDetected.description,
     });
@@ -140,87 +154,103 @@ function scoreMarketStructure({
   // Hold Confirmed (+3)
   if (holdConfirmed) {
     score += 3;
-    breakdown.push({ 
-      factor: '✅ Hold Confirmed', 
+    breakdown.push({
+      factor: "✅ Hold Confirmed",
       points: 3,
       critical: true,
-      description: 'Level held - High probability setup',
+      description: "Level held",
     });
   }
 
   // === CANDLE ANALYSIS ===
-  
+
   // Rejection Candle (+2)
   if (rejectionCandle?.detected) {
     score += 2;
-    breakdown.push({ 
-      factor: `${rejectionCandle.type.replace('_', ' ')}`, 
+    breakdown.push({
+      factor: `${rejectionCandle.type.replace("_", " ")}`,
       points: 2,
       strength: rejectionCandle.strength,
     });
   }
 
-  // Strong Candle (+1)
+  // Strong Candle: pattern confirmation (+1)
   if (strongCandle?.isStrong) {
     const points = strongCandle.enhanced ? 1.5 : 1;
     score += points;
-    breakdown.push({ 
-      factor: strongCandle.enhanced ? 'Enhanced Strong Candle' : 'Strong Candle', 
+    breakdown.push({
+      factor: strongCandle.enhanced ? "Strong Candle+" : "Strong Candle",
       points,
     });
   }
 
   // === VOLUME ===
-  
+
   // Volume Confirmation (+1)
   if (volumeConfirmation?.confirmed) {
     score += 1;
-    breakdown.push({ 
-      factor: 'Volume Spike', 
+    breakdown.push({
+      factor: "Volume Spike",
       points: 1,
       ratio: volumeConfirmation.volumeRatio,
     });
   }
 
   // === S/R PROXIMITY ===
-  
+
   // Near S/R Level (+1)
   if (nearLevel) {
     score += 1;
-    breakdown.push({ factor: 'Near S/R Level', points: 1 });
+    breakdown.push({ factor: "Near S/R", points: 1 });
   }
 
   // Level Importance (+0.5-1.5)
   if (levelImportance) {
     score += levelImportance;
-    breakdown.push({ 
-      factor: `Level Importance`, 
+    breakdown.push({
+      factor: `Level Importance`,
       points: levelImportance,
     });
   }
 
-  // === GRADE ASSIGNMENT ===
-  
+  // === V3: MULTI-TIMEFRAME ALIGNMENT (+2) ===
+  if (mtfAligned) {
+    score += 2;
+    breakdown.push({ factor: "📊 Multi-TF Aligned", points: 2 });
+  }
+
+  // === V3 FIX: PRICE STRUCTURE (+1-2) ===
+  if (priceStructure > 0) {
+    score += priceStructure;
+    breakdown.push({
+      factor: priceStructure === 2 ? "🔥 Strong Structure" : "Structure",
+      points: priceStructure,
+    });
+  }
+
+  // === V3 STRICT GRADE ASSIGNMENT ===
+  // A+ (16+), A (13-15), B+ (12+), B (7-11), Ignore (<7)
+
   let grade;
   let tradeable = false;
   let autoExecute = false;
 
-  if (score >= 14) {
-    grade = 'A+';
+  if (score >= 16) {
+    grade = "A+";
     tradeable = true;
-    autoExecute = retestDetected && cprState?.state !== 'INSIDE';
-  } else if (score >= 11) {
-    grade = 'A';
+    autoExecute = retestDetected && cprState?.state !== "INSIDE";
+  } else if (score >= 13) {
+    grade = "A";
     tradeable = true;
-  } else if (score >= 8) {
-    grade = 'B+';
-    tradeable = true; // B+ is now tradeable! (Manual confirmation recommended)
-  } else if (score >= 6) {
-    grade = 'B';
-    tradeable = false; // Watchlist - can upgrade to B+
+  } else if (score >= 12) {
+    grade = "B+";
+    tradeable = true; // STRICT: Only with proper structure (enforced in strategy.js)
+  } else if (score >= 7) {
+    grade = "B";
+    tradeable = false; // Watchlist
   } else {
-    grade = 'C';
-    tradeable = false; // Ignore - wait for better setup
+    grade = "C";
+    tradeable = false; // Ignore
   }
 
   return {
@@ -229,8 +259,8 @@ function scoreMarketStructure({
     breakdown,
     tradeable,
     autoExecute,
-    maxScore: 20,
-    scorePercent: Math.round((score / 20) * 100),
+    maxScore: 22,
+    scorePercent: Math.round((score / 22) * 100),
   };
 }
 

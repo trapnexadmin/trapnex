@@ -112,6 +112,17 @@ function broadcast(type, data) {
   }
 }
 
+function normalizeTradeEventTrade(trade) {
+  if (!trade) return null;
+
+  return {
+    ...trade,
+    entryPrice: trade.entry,
+    entryTime: trade.openTime ?? trade.timestamp ?? null,
+    pnlPercent: trade.pnlPercent ?? 0,
+  };
+}
+
 // ---- Demo Mode (simulated data when no Upstox token) ----
 function startDemoMode() {
   console.log("[Demo] Starting demo mode with simulated data...");
@@ -165,6 +176,14 @@ function startDemoMode() {
       closingSeconds: closingSeconds,
       candleCloseTime: candleClose,
     });
+
+    if (result?.pnlUpdate) {
+      broadcast("TRADE_UPDATE", {
+        ...result.pnlUpdate,
+        trade: normalizeTradeEventTrade(result.pnlUpdate.trade),
+        activeTrade: pnlTracker.getActiveTrade(),
+      });
+    }
   }, 1000);
 
   // Set up analysis callbacks BEFORE starting periodic analysis
@@ -306,6 +325,14 @@ async function startLiveMode() {
       closingSeconds: tick.closingSeconds || 0,
       candleCloseTime: tick.candleCloseTime || null,
     });
+
+    if (result?.pnlUpdate) {
+      broadcast("TRADE_UPDATE", {
+        ...result.pnlUpdate,
+        trade: normalizeTradeEventTrade(result.pnlUpdate.trade),
+        activeTrade: pnlTracker.getActiveTrade(),
+      });
+    }
 
     // Save candles periodically (every 5 minutes)
     const now = Date.now();

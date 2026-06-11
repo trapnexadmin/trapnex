@@ -1,6 +1,39 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
+function normalizeTrade(trade) {
+  if (!trade) return null;
+
+  const entryPrice = trade.entryPrice ?? trade.entry?.price ?? trade.entry ?? 0;
+  const entryTime = trade.entryTime ?? trade.entry?.time ?? trade.openTime ?? trade.createdAt ?? null;
+  const exitPrice = trade.exitPrice ?? trade.exit?.price ?? trade.target ?? null;
+  const pnl = typeof trade.pnl === "number" ? trade.pnl : trade.pnl?.points ?? 0;
+
+  return {
+    ...trade,
+    entryPrice,
+    entryTime,
+    exitPrice,
+    pnl,
+    result:
+      trade.result || (pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : null),
+  };
+}
+
+function normalizeStats(stats) {
+  return {
+    totalTrades: stats?.totalTrades ?? stats?.total ?? 0,
+    wins: stats?.wins ?? 0,
+    losses: stats?.losses ?? 0,
+    winRate: stats?.winRate ?? 0,
+    totalPnL: stats?.totalPnL ?? 0,
+    avgPnL: stats?.avgPnl ?? 0,
+    bestTrade: stats?.bestTrade ?? 0,
+    worstTrade: stats?.worstTrade ?? 0,
+    maxDrawdown: stats?.maxDrawdown ?? 0,
+  };
+}
+
 export default function PnLAnalysisPage({ onClose }) {
   const [data, setData] = useState({
     trades: [],
@@ -66,9 +99,9 @@ export default function PnLAnalysisPage({ onClose }) {
       });
 
       setData({
-        trades: tradesRes || [],
+        trades: (tradesRes || []).map(normalizeTrade).filter(Boolean),
         signals: signalsRes?.signals || signalsRes || [],
-        stats: statsRes || null,
+        stats: normalizeStats(statsRes || null),
       });
     } catch (err) {
       console.error("[PnL Analysis] Failed to load data:", err);
@@ -329,13 +362,15 @@ export default function PnLAnalysisPage({ onClose }) {
                           className="hover:bg-white/5 transition-colors"
                         >
                           <td className="px-4 py-3 text-sm text-brand-muted">
-                            {new Date(trade.entry.time).toLocaleString(
+                            {trade.entryTime
+                              ? new Date(trade.entryTime).toLocaleString(
                               "en-IN",
                               {
                                 dateStyle: "short",
                                 timeStyle: "short",
                               },
-                            )}
+                            )
+                              : "—"}
                           </td>
                           <td className="px-4 py-3">
                             <span
@@ -349,10 +384,10 @@ export default function PnLAnalysisPage({ onClose }) {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-brand-text text-right font-mono">
-                            {trade.entry.price.toFixed(2)}
+                            {(trade.entryPrice || 0).toFixed(2)}
                           </td>
                           <td className="px-4 py-3 text-sm text-brand-text text-right font-mono">
-                            {trade.exit?.price?.toFixed(2) || "—"}
+                            {trade.exitPrice != null ? trade.exitPrice.toFixed(2) : "—"}
                           </td>
                           <td
                             className={`px-4 py-3 text-sm text-right font-mono font-semibold ${

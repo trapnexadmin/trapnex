@@ -38,6 +38,7 @@ export function useWebSocket() {
     candles: { '1m': [], '3m': [], '5m': [], '15m': [] },
     analysis: null,
     activeTrade: null,
+    tradeEvent: null,
     signal: null,
     price: 0,
     volume: 0,
@@ -160,6 +161,23 @@ export function useWebSocket() {
                 activeTrade: msg.data.activeTrade || prev.activeTrade,
                 closingSeconds: msg.data.closingSeconds || 0,
                 candleCloseTime: msg.data.candleCloseTime || null,
+              };
+              break;
+
+            case 'TRADE_UPDATE':
+              newData = {
+                ...prev,
+                activeTrade: msg.data.activeTrade ?? null,
+                tradeEvent: {
+                  event: msg.data.event,
+                  reason: msg.data.trade?.reason || null,
+                  targetIdx: msg.data.targetIdx,
+                  targetLabel: msg.data.targetLabel,
+                  targetPrice: msg.data.targetPrice,
+                  newSL: msg.data.newSL,
+                  trade: msg.data.trade || null,
+                  timestamp: Date.now(),
+                },
               };
               break;
 

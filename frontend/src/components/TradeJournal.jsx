@@ -1,5 +1,21 @@
 import { useState, useMemo } from 'react';
 
+function getEntryPrice(trade) {
+  return trade.entryPrice ?? trade.entry?.price ?? trade.entry ?? 0;
+}
+
+function getExitPrice(trade) {
+  return trade.exitPrice ?? trade.exit?.price ?? null;
+}
+
+function getTradeTime(trade) {
+  return trade.entryTime ?? trade.entry?.time ?? trade.timestamp ?? trade.openTime ?? trade.createdAt ?? null;
+}
+
+function getTradePnl(trade) {
+  return typeof trade.pnl === 'number' ? trade.pnl : trade.pnl?.points ?? 0;
+}
+
 export default function TradeJournal({ trades = [], stats = {} }) {
   const [tab, setTab] = useState('trades');
   const [filter, setFilter] = useState('all'); // all, call, put, win, loss
@@ -92,7 +108,7 @@ function TradeList({ trades, filter }) {
             </div>
             <div>
               <div className="text-xs font-medium flex items-center gap-2">
-                <span>{trade.entry?.toFixed(2)} → {trade.exitPrice?.toFixed(2) || '—'}</span>
+                <span>{getEntryPrice(trade).toFixed(2)} → {getExitPrice(trade)?.toFixed(2) || '—'}</span>
                 {trade.score && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
                     trade.grade === 'A+' || trade.grade === 'A'
@@ -107,8 +123,8 @@ function TradeList({ trades, filter }) {
               </div>
               <div className="text-[10px] text-brand-muted mt-0.5">
                 {trade.reason || 'Active'}
-                {trade.timestamp && (
-                  <> • {new Date(trade.timestamp || trade.openTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</>
+                {getTradeTime(trade) && (
+                  <> • {new Date(getTradeTime(trade)).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</>
                 )}
               </div>
             </div>
@@ -122,7 +138,7 @@ function TradeList({ trades, filter }) {
                 'text-brand-muted'
               }`}
             >
-              {trade.pnl >= 0 ? '+' : ''}{trade.pnl?.toFixed(2) || '0.00'}
+              {getTradePnl(trade) >= 0 ? '+' : ''}{getTradePnl(trade).toFixed(2)}
             </div>
             <div
               className={`text-[10px] font-medium ${

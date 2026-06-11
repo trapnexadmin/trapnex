@@ -215,9 +215,11 @@ class LevelRetestTracker {
           price: level.price,
           direction: 'BULLISH',
           type: level.type,
+          breakoutIndex: candles.length - 1,
           breakoutCandle: lastCandle.time,
           timestamp: Date.now(),
           score: 1,
+          description: `${level.name} bullish breakout`,
         };
 
         this.activeBreakouts.push(breakout);
@@ -235,9 +237,11 @@ class LevelRetestTracker {
           price: level.price,
           direction: 'BEARISH',
           type: level.type,
+          breakoutIndex: candles.length - 1,
           breakoutCandle: lastCandle.time,
           timestamp: Date.now(),
           score: 1,
+          description: `${level.name} bearish breakdown`,
         };
 
         this.activeBreakouts.push(breakout);
@@ -263,34 +267,56 @@ class LevelRetestTracker {
       const breakout = this.activeBreakouts[i]; // 60 minutes on 3m
 
       // Skip if too old (more than 20 candles ago)
-      if (candles.length - breakout.breakoutCandle > 20) {
+      if ((candles.length - 1) - (breakout.breakoutIndex ?? candles.length - 1) > 20) {
         this.activeBreakouts.splice(i, 1);
         continue;
       }
 
       const levelPrice = breakout.price;
-      const priceDistance = Math.abs(currentPrice - levelPrice);
-      const distancePercent = (priceDistance / levelPrice) * 100;
+      const recentCandles = candles.slice(-3);
+      const touchedLevel = recentCandles.some((candle) => {
+        const priceDistance = Math.abs(candle.close - levelPrice);
+        const distancePercent = (priceDistance / levelPrice) * 100;
+        const wickTouched = candle.high >= levelPrice && candle.low <= levelPrice;
+        return distancePercent <= retestThreshold || wickTouched;
+      });
 
-      // Check if price returned to level
-      if (distancePercent <= retestThreshold) {
-        // Check for rejection candle
-        const rejection = this.detectRejectionCandle(lastCandle, breakout.direction);
+      if (!touchedLevel) {
+        continue;
+      }
 
-        if (rejection.detected) {
-          const retest = {
-            ...breakout,
-            retestDetected: true,
-            retestCandle: lastCandle.time,
-            rejectionType: rejection.type,
-            rejectionStrength: rejection.strength,
-            score: 2, // Retest success score
-          };
+      const rejectionCandidate = recentCandles
+        .map((candle, idx) => ({ candle, idx: candles.length - recentCandles.length + idx }))
+        .reverse()
+        .find(({ candle }) => this.detectRejectionCandle(candle, breakout.direction).detected);
 
-          this.activeRetests.push(retest);
-          this.activeBreakouts.splice(i, 1); // Remove from breakouts
-          return retest;
-        }
+      const closesHoldingLevel = recentCandles.filter((candle) =>
+        breakout.direction === 'BULLISH'
+          ? candle.close >= levelPrice
+          : candle.close <= levelPrice
+      ).length;
+      const consolidationDetected = closesHoldingLevel >= 2;
+
+      if (rejectionCandidate || consolidationDetected) {
+        const rejection = rejectionCandidate
+          ? this.detectRejectionCandle(rejectionCandidate.candle, breakout.direction)
+          : { detected: false, type: 'CONSOLIDATION_HOLD', strength: 0 };
+
+        const retest = {
+          ...breakout,
+          retestDetected: true,
+          retestIndex: rejectionCandidate?.idx ?? candles.length - 1,
+          retestCandle: rejectionCandidate?.candle.time ?? lastCandle.time,
+          rejectionType: rejection.type,
+          rejectionStrength: rejection.strength,
+          consolidationDetected,
+          score: 2,
+          description: `${breakout.level} retest ${rejection.detected ? 'rejection' : 'consolidation hold'}`,
+        };
+
+        this.activeRetests.push(retest);
+        this.activeBreakouts.splice(i, 1);
+        return retest;
       }
     }
 
@@ -313,24 +339,35 @@ class LevelRetestTracker {
       const retest = this.activeRetests[i];
 
       // Skip if already confirmed or too old
-      if (retest.confirmed || candles.length - retest.retestCandle > 4) {
+      if (retest.confirmed || ((candles.length - 1) - (retest.retestIndex ?? candles.length - 1) > 4)) {
         this.activeRetests.splice(i, 1);
         continue;
       }
 
       const levelPrice = retest.price;
+      const previousCandle = candles[candles.length - 2];
 
       // Bullish hold: price stays above level
-      if (retest.direction === 'BULLISH' && lastCandle.close > levelPrice) {
+      if (
+        retest.direction === 'BULLISH' &&
+        lastCandle.close > levelPrice &&
+        (lastCandle.close > previousCandle.close || lastCandle.high > previousCandle.high)
+      ) {
         retest.confirmed = true;
+        retest.confirmationType = retest.consolidationDetected ? 'CONSOLIDATION_CONTINUATION' : 'REJECTION_CONTINUATION';
         retest.confirmCandle = lastCandle.time;
         retest.score += 3; // Hold confirmation score
         return retest;
       }
 
       // Bearish hold: price stays below level
-      if (retest.direction === 'BEARISH' && lastCandle.close < levelPrice) {
+      if (
+        retest.direction === 'BEARISH' &&
+        lastCandle.close < levelPrice &&
+        (lastCandle.close < previousCandle.close || lastCandle.low < previousCandle.low)
+      ) {
         retest.confirmed = true;
+        retest.confirmationType = retest.consolidationDetected ? 'CONSOLIDATION_CONTINUATION' : 'REJECTION_CONTINUATION';
         retest.confirmCandle = lastCandle.time;
         retest.score += 3; // Hold confirmation score
         return retest;

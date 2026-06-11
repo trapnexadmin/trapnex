@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import soundManager from "../utils/soundManager";
 
 const SYMBOLS = [
@@ -17,6 +17,29 @@ export default function Header({
   const [selectedSymbol, setSelectedSymbol] = useState(SYMBOLS[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(!soundManager.enabled);
+  const [isLight, setIsLight] = useState(() => {
+    return document.body.classList.contains("light");
+  });
+
+  const toggleTheme = () => {
+    const newLight = !isLight;
+    setIsLight(newLight);
+    if (newLight) {
+      document.body.classList.add("light");
+      localStorage.setItem("trapnex-theme", "light");
+    } else {
+      document.body.classList.remove("light");
+      localStorage.setItem("trapnex-theme", "dark");
+    }
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem("trapnex-theme");
+    if (saved === "light") {
+      document.body.classList.add("light");
+      setIsLight(true);
+    }
+  }, []);
 
   const handleSymbolChange = (symbol) => {
     setSelectedSymbol(symbol);
@@ -189,6 +212,23 @@ export default function Header({
                   strokeWidth={2}
                   d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
                 />
+              </svg>
+            )}
+          </button>
+
+          {/* Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            className="p-2 bg-brand-dark/50 hover:bg-brand-dark/70 border border-brand-border rounded-lg transition-all group"
+            title={isLight ? "Switch to dark mode" : "Switch to light mode"}
+          >
+            {isLight ? (
+              <svg className="w-4 h-4 text-brand-muted group-hover:text-brand-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4 text-yellow-400 group-hover:text-yellow-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
             )}
           </button>

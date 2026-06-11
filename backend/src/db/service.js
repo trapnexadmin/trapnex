@@ -164,6 +164,11 @@ class DatabaseService {
   async saveTrade(trade, signalId = null) {
     if (!isDBConnected()) return { saved: false, reason: "DB offline" };
 
+    if (!trade) {
+      console.log("[DB] Cannot save trade - missing trade data");
+      return { saved: false, reason: "Missing trade data" };
+    }
+
     try {
       const tradeData = new Trade({
         symbol: this.symbol,
@@ -171,24 +176,32 @@ class DatabaseService {
         type: trade.type,
         entry: {
           price: trade.entry,
-          time: new Date(trade.timestamp || Date.now()),
+          time: new Date(trade.openTime || trade.timestamp || Date.now()),
         },
         stopLoss: trade.stopLoss,
+        initialSL: trade.initialSL || trade.stopLoss,
         target: trade.target,
+        t1: trade.t1,
+        targets: trade.targets || [],
+        targetPoints: trade.targetPoints || [],
         riskReward: trade.riskReward,
         status: trade.status || "OPEN",
         score: trade.score,
         grade: trade.grade,
+        result: null,
+        pnl: { points: 0, amount: 0, percentage: 0 },
         metadata: {
-          platform: "ANGELONE",
+          platform: "TRAPNEX",
           mode: "LIVE",
+          source: trade.source || "SIGNAL",
         },
       });
 
       const result = await tradeData.save();
+      console.log("[DB] ✓ Trade saved successfully:", result._id);
       return { saved: true, tradeId: result._id };
     } catch (err) {
-      console.error("[DB] Error saving trade:", err.message);
+      console.error("[DB] ✗ Error saving trade:", err.message);
       return { saved: false, error: err.message };
     }
   }

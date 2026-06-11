@@ -19,7 +19,7 @@ export default function App() {
   const [journal, setJournal] = useState({ trades: [], stats: {} });
   const [showPnLAnalysis, setShowPnLAnalysis] = useState(false);
   const lastSignalRef = useRef(null);
-  const lastTradeStatusRef = useRef(null);
+  const lastTradeEventRef = useRef(null);
 
   const handleSymbolChange = useCallback(
     (symbol) => {
@@ -69,67 +69,39 @@ export default function App() {
     }
   }, [ws.signal, ws.analysis?.signal]);
 
-  // Sound notifications for trade status changes
+  // Sound notifications for trade events
   useEffect(() => {
-    // Detect transition: Trade was active, now it's closed
-    if (lastTradeStatusRef.current && !ws.activeTrade) {
-      console.log("[Sound] 🔴 Trade closed, fetching latest journal...");
+    const eventKey = ws.tradeEvent?.timestamp;
+    if (!eventKey || eventKey === lastTradeEventRef.current) return;
 
-      // Fetch journal immediately to get the latest trade reason
-      fetch("/api/journal")
-        .then((res) => res.json())
-        .then((data) => {
-          const lastTrade = data.trades?.[0];
-          console.log("[Sound] Last trade data:", lastTrade);
+    lastTradeEventRef.current = eventKey;
 
-          if (lastTrade) {
-            console.log(
-              "[Sound] Last trade result:",
-              lastTrade.reason,
-              "P&L:",
-              lastTrade.pnl,
-            );
-
-            // Small delay to ensure sound plays after UI updates
-            setTimeout(() => {
-              if (lastTrade.reason === "TARGET_HIT") {
-                soundManager.playTarget();
-                console.log("[Sound] ✅ 🎯 Target hit! P&L: +" + lastTrade.pnl);
-              } else if (lastTrade.reason === "STOP_LOSS") {
-                soundManager.playStopLoss();
-                console.log(
-                  "[Sound] ✅ 🛑 Stop loss hit! P&L: " + lastTrade.pnl,
-                );
-              } else if (lastTrade.reason === "EXIT_SIGNAL") {
-                soundManager.playTarget();
-                console.log(
-                  "[Sound] ✅ 📊 Exit signal triggered! P&L: " + lastTrade.pnl,
-                );
-              } else if (lastTrade.reason === "MARKET_CLOSED") {
-                // Play target/stoploss sound based on P&L result
-                if (lastTrade.pnl >= 0) {
-                  soundManager.playTarget();
-                  console.log(
-                    "[Sound] ✅ ⏰ Market closed! P&L: +" + lastTrade.pnl,
-                  );
-                } else {
-                  soundManager.playStopLoss();
-                  console.log(
-                    "[Sound] ✅ ⏰ Market closed! P&L: " + lastTrade.pnl,
-                  );
-                }
-              }
-            }, 100);
-          } else {
-            console.log("[Sound] ⚠ No trade data available yet");
-          }
-        })
-        .catch((err) => console.error("[Sound] Error fetching journal:", err));
+    if (ws.tradeEvent?.event === "TARGET_HIT") {
+      soundManager.playTarget();
+      console.log("[Sound] ✅ 🎯 Target hit", ws.tradeEvent.targetLabel || "");
+      fetchJournal();
+      return;
     }
 
-    // Update reference for next comparison
-    lastTradeStatusRef.current = ws.activeTrade;
-  }, [ws.activeTrade]);
+    if (ws.tradeEvent?.event === "CLOSED") {
+      const reason = ws.tradeEvent.trade?.reason;
+      const pnl = ws.tradeEvent.trade?.pnl || 0;
+
+      if (reason === "STOP_LOSS") {
+        soundManager.playStopLoss();
+      } else if (reason === "TARGET_HIT" || reason === "EXIT_SIGNAL") {
+        soundManager.playTarget();
+      } else if (reason === "MARKET_CLOSED") {
+        if (pnl >= 0) {
+          soundManager.playTarget();
+        } else {
+          soundManager.playStopLoss();
+        }
+      }
+
+      fetchJournal();
+    }
+  }, [ws.tradeEvent, fetchJournal]);
 
   return (
     <>

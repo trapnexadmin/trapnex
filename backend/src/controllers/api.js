@@ -6,6 +6,77 @@ const express = require('express');
 const router = express.Router();
 const dbService = require('../db/service');
 
+function normalizeTrade(trade) {
+  if (!trade) return null;
+
+  const entryPrice = trade.entry?.price ?? trade.entry ?? 0;
+  const entryTime = trade.entry?.time ?? trade.openTime ?? trade.timestamp ?? trade.createdAt ?? null;
+  const exitPrice = trade.exit?.price ?? trade.exitPrice ?? null;
+  const exitTime = trade.exit?.time ?? trade.closeTime ?? null;
+  const reason = trade.exit?.reason ?? trade.reason ?? null;
+  const pnlPoints = typeof trade.pnl === 'number' ? trade.pnl : trade.pnl?.points ?? 0;
+  const pnlPercent = trade.pnlPercent ?? trade.pnl?.percentage ?? 0;
+
+  return {
+    ...trade,
+    id: trade.id || trade._id?.toString?.() || null,
+    entry: entryPrice,
+    entryPrice,
+    entryTime,
+    exitPrice,
+    exitTime,
+    reason,
+    pnl: pnlPoints,
+    pnlPercent,
+    openTime: trade.openTime ?? entryTime,
+    closeTime: trade.closeTime ?? exitTime,
+    target: trade.target ?? trade.targets?.[trade.targets.length - 1] ?? null,
+    score: trade.score ?? 0,
+    grade: trade.grade ?? null,
+    targets: trade.targets ?? [],
+    targetPoints: trade.targetPoints ?? [],
+    targetsHit: trade.targetsHit ?? [],
+    result:
+      trade.result ||
+      (pnlPoints > 0 ? 'WIN' : pnlPoints < 0 ? 'LOSS' : null),
+  };
+}
+
+function buildGradeStats(trades) {
+  return trades.reduce((acc, trade) => {
+    const grade = trade.grade || 'Unknown';
+    if (!acc[grade]) acc[grade] = { total: 0, wins: 0, pnl: 0 };
+    acc[grade].total += 1;
+    if (trade.result === 'WIN') acc[grade].wins += 1;
+    acc[grade].pnl += trade.pnl || 0;
+    return acc;
+  }, {});
+}
+
+function normalizeStats(stats, trades = []) {
+  const normalizedTrades = trades.map(normalizeTrade).filter(Boolean);
+  const total = stats?.total ?? stats?.totalTrades ?? normalizedTrades.length ?? 0;
+  const wins = stats?.wins ?? stats?.winners ?? normalizedTrades.filter((trade) => trade.result === 'WIN').length;
+  const losses = stats?.losses ?? stats?.losers ?? Math.max(0, total - wins);
+  const totalPnl = stats?.totalPnl ?? 0;
+  const avgPnl = stats?.avgPnl ?? (total > 0 ? totalPnl / total : 0);
+
+  return {
+    ...stats,
+    total,
+    totalTrades: total,
+    wins,
+    losses,
+    winRate: stats?.winRate ?? (total > 0 ? (wins / total) * 100 : 0),
+    totalPnl,
+    avgPnl,
+    bestTrade: stats?.bestTrade ?? 0,
+    worstTrade: stats?.worstTrade ?? 0,
+    maxDrawdown: stats?.maxDrawdown ?? Math.abs(stats?.worstTrade ?? 0),
+    byGrade: stats?.byGrade || buildGradeStats(normalizedTrades),
+  };
+}
+
 function createControllers(strategyRunner, journal) {
   // Get current state (candles, analysis, trade)
   router.get('/state', (req, res) => {
@@ -64,17 +135,39 @@ function createControllers(strategyRunner, journal) {
   });
 
   // Trade journal
-  router.get('/journal', (req, res) => {
-    const limit = parseInt(req.query.limit) || 50;
-    res.json({
-      trades: journal.getTrades(limit),
-      stats: journal.getStats(),
-    });
+  router.get('/journal', async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      let trades = journal.getTrades(limit).map(normalizeTrade);
+      let stats = normalizeStats(journal.getStats(), trades);
+
+      if (trades.length === 0) {
+        const persistedTrades = await dbService.getTradesWithFilter({}, limit);
+        trades = persistedTrades.map(normalizeTrade);
+        const persistedStats = await dbService.getTradeStatsWithFilter({});
+        stats = normalizeStats(persistedStats, trades);
+      }
+
+      res.json({ trades, stats });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to load journal' });
+    }
   });
 
   // Journal stats
-  router.get('/journal/stats', (req, res) => {
-    res.json(journal.getStats());
+  router.get('/journal/stats', async (req, res) => {
+    try {
+      const trades = journal.getTrades(200).map(normalizeTrade);
+      if (trades.length > 0) {
+        return res.json(normalizeStats(journal.getStats(), trades));
+      }
+
+      const persistedTrades = (await dbService.getTradesWithFilter({}, 200)).map(normalizeTrade);
+      const persistedStats = await dbService.getTradeStatsWithFilter({});
+      res.json(normalizeStats(persistedStats, persistedTrades));
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to load journal stats' });
+    }
   });
 
   // Set previous day HLC
@@ -159,7 +252,7 @@ function createControllers(strategyRunner, journal) {
       }
       
       const trades = await dbService.getTradesWithFilter(filter, limit);
-      res.json(trades);
+      res.json(trades.map(normalizeTrade));
     } catch (err) {
       res.status(500).json({ error: 'Failed to load trades from database' });
     }
@@ -177,8 +270,9 @@ function createControllers(strategyRunner, journal) {
         if (endDate) filter['entry.time'].$lte = new Date(endDate);
       }
       
+      const trades = await dbService.getTradesWithFilter(filter, 500);
       const stats = await dbService.getTradeStatsWithFilter(filter);
-      res.json(stats || {});
+      res.json(normalizeStats(stats || {}, trades));
     } catch (err) {
       res.status(500).json({ error: 'Failed to load trade stats' });
     }
