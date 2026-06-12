@@ -6,6 +6,29 @@ export default function SignalCard({ signal, scoring }) {
   const isCall = signal.type === 'CALL';
   const targets = signal.targets || (signal.target ? [signal.target] : []);
   const targetPoints = signal.targetPoints || [];
+  const isCompactTargetProfile = signal.targetProfile === 'compact';
+  const sourceLabel = {
+    RETEST_CONFIRMED: 'Retest Confirmed',
+    RETEST_PENDING: 'Retest Pending',
+    BREAKOUT_CONTINUATION: 'Breakout Continuation',
+    BREAKOUT_EXPLOSIVE: 'Explosive Breakout',
+    RANGE_REJECTION_CONTINUATION: 'Range Rejection',
+    QUICK_REVERSAL_CONTINUATION: 'Quick Reversal',
+    CPR_REJECTION: 'CPR Rejection',
+    CPR_AM_MANIPULATION: 'CPR AM Manipulation',
+  }[signal.source] || signal.source?.replace(/_/g, ' ');
+  const sourceBadgeClass = {
+    BREAKOUT_EXPLOSIVE:
+      'text-amber-300 bg-amber-500/10 border border-amber-400/30',
+    BREAKOUT_CONTINUATION:
+      'text-cyan-300 bg-cyan-500/10 border border-cyan-400/30',
+    RANGE_REJECTION_CONTINUATION:
+      'text-rose-300 bg-rose-500/10 border border-rose-400/30',
+    QUICK_REVERSAL_CONTINUATION:
+      'text-lime-300 bg-lime-500/10 border border-lime-400/30',
+    RETEST_CONFIRMED:
+      'text-brand-green bg-brand-green/10 border border-brand-green/25',
+  }[signal.source] || 'text-brand-muted bg-white/5 border border-white/10';
 
   return (
     <motion.div
@@ -53,8 +76,8 @@ export default function SignalCard({ signal, scoring }) {
           {signal.type}
         </span>
         {signal.source && (
-          <span className="text-[10px] text-brand-muted bg-white/5 px-2 py-0.5 rounded border border-white/10">
-            {signal.source.replace(/_/g, ' ')}
+          <span className={`text-[10px] px-2 py-0.5 rounded ${sourceBadgeClass}`}>
+            {sourceLabel}
           </span>
         )}
       </div>
@@ -72,8 +95,15 @@ export default function SignalCard({ signal, scoring }) {
       {/* Multi-Target Levels */}
       {targets.length > 0 && (
         <div className="border-t border-brand-border pt-3 mb-3">
-          <div className="text-[10px] text-brand-muted uppercase tracking-wider mb-2">
-            Targets
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <div className="text-[10px] text-brand-muted uppercase tracking-wider">
+              Targets
+            </div>
+            {isCompactTargetProfile && (
+              <span className="text-[9px] uppercase tracking-wider text-rose-300 bg-rose-500/10 border border-rose-400/30 px-1.5 py-0.5 rounded">
+                Compact Profile
+              </span>
+            )}
           </div>
           <div className="flex gap-1 flex-wrap">
             {targets.map((tgt, i) => (

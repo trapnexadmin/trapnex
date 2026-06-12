@@ -1,13 +1,13 @@
 /**
  * Live PnL Tracker - V3
  * Multi-target tracking with trailing stop logic
- * 
+ *
  * Trailing SL Rules (per grade):
- * After T1: SL moves to Entry +5 (lock trade)
+ * After T1: SL moves to Entry +10
  * After T2: SL moves to T1
  * After T3: SL moves to T2
  * After T4+: SL moves to previous target
- * 
+ *
  * Position reduction at each target (equal portions):
  * 20% booked at each target
  */
@@ -18,7 +18,21 @@ class PnLTracker {
     this.tradeHistory = [];
   }
 
-  openTrade({ type, entry, stopLoss, target, t1, targets, targetPoints, score, grade, timestamp }) {
+  openTrade({
+    type,
+    entry,
+    stopLoss,
+    target,
+    t1,
+    targets,
+    targetPoints,
+    score,
+    grade,
+    timestamp,
+    source,
+    level,
+    levelPrice,
+  }) {
     if (this.activeTrade) return null;
 
     // Support both old single-target and new multi-target signals
@@ -27,25 +41,28 @@ class PnLTracker {
 
     this.activeTrade = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-      type,           // 'CALL' or 'PUT'
+      type, // 'CALL' or 'PUT'
       entry,
       stopLoss,
-      initialSL: stopLoss,  // store original SL
-      target: target || (allTargets[allTargets.length - 1]),
+      initialSL: stopLoss, // store original SL
+      target: target || allTargets[allTargets.length - 1],
       t1: firstTarget,
-      targets: allTargets,  // array of all targets
+      targets: allTargets, // array of all targets
       targetPoints: targetPoints || [],
       score,
       grade,
+      source,
+      level,
+      levelPrice,
       openTime: timestamp || Date.now(),
       currentPrice: entry,
       pnl: 0,
       pnlPercent: 0,
       status: "OPEN",
       // Multi-target tracking
-      targetsHit: [],       // which targets have been hit
-      currentTargetIdx: 0,  // next target to hit
-      positionSize: 100,    // 100% of position remaining
+      targetsHit: [], // which targets have been hit
+      currentTargetIdx: 0, // next target to hit
+      positionSize: 100, // 100% of position remaining
       trailActive: false,
     };
 
@@ -66,9 +83,8 @@ class PnLTracker {
       trade.pnl = round(trade.entry - currentPrice);
     }
 
-    trade.pnlPercent = trade.entry > 0
-      ? round((trade.pnl / trade.entry) * 100)
-      : 0;
+    trade.pnlPercent =
+      trade.entry > 0 ? round((trade.pnl / trade.entry) * 100) : 0;
 
     // Check stop loss
     if (trade.type === "CALL" && currentPrice <= trade.stopLoss) {
@@ -127,14 +143,16 @@ class PnLTracker {
   }
 
   _updateTrailingSL(trade, targetIdx) {
-    // After T1 (idx=0): SL = Entry + 5 (lock trade, small profit buffer)
+    // After T1 (idx=0): structure trades trail just beyond the broken level
+    // First lock for B+, A, A+ trades is entry +10.
     // After T2 (idx=1): SL = T1
     // After T3+: SL = previous target
     if (targetIdx === 0) {
-      // After first target: lock at entry + 5pts
-      const lockPrice = trade.type === "CALL"
-        ? round(trade.entry + 5)
-        : round(trade.entry - 5);
+      const lockPrice =
+        trade.type === "CALL"
+          ? round(trade.entry + 10)
+          : round(trade.entry - 10);
+
       trade.stopLoss = lockPrice;
       trade.trailActive = true;
     } else {
@@ -163,9 +181,8 @@ class PnLTracker {
     } else {
       trade.pnl = round(trade.entry - ep);
     }
-    trade.pnlPercent = trade.entry > 0
-      ? round((trade.pnl / trade.entry) * 100)
-      : 0;
+    trade.pnlPercent =
+      trade.entry > 0 ? round((trade.pnl / trade.entry) * 100) : 0;
     trade.result = trade.pnl >= 0 ? "WIN" : "LOSS";
 
     this.tradeHistory.push(trade);

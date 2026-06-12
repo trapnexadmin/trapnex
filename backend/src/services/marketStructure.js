@@ -378,6 +378,73 @@ class LevelRetestTracker {
   }
 
   /**
+   * Detect continuation entry after breakout when price trends with only a shallow pullback.
+   * This covers momentum continuation that does not fully retest the breakout level.
+   */
+  detectContinuationEntry(candles) {
+    if (!candles || candles.length < 4) return null;
+
+    const lastCandle = candles[candles.length - 1];
+    const previousCandle = candles[candles.length - 2];
+
+    for (let i = this.activeBreakouts.length - 1; i >= 0; i--) {
+      const breakout = this.activeBreakouts[i];
+      const breakoutIndex = breakout.breakoutIndex ?? candles.length - 1;
+      const candlesSinceBreakout = (candles.length - 1) - breakoutIndex;
+
+      if (candlesSinceBreakout > 6) {
+        this.activeBreakouts.splice(i, 1);
+        continue;
+      }
+
+      if (candlesSinceBreakout < 2) {
+        continue;
+      }
+
+      const breakoutCandle = candles[breakoutIndex];
+      const postBreakoutCandles = candles.slice(breakoutIndex);
+      if (!breakoutCandle || postBreakoutCandles.length < 3) {
+        continue;
+      }
+
+      const breakoutRange = Math.max(0.01, breakoutCandle.high - breakoutCandle.low);
+      const shallowPullbackFloor = breakout.direction === 'BULLISH'
+        ? breakoutCandle.high - breakoutRange * 0.45
+        : breakoutCandle.low + breakoutRange * 0.45;
+
+      const heldBreakoutSide = postBreakoutCandles.every((candle) =>
+        breakout.direction === 'BULLISH'
+          ? candle.close >= breakout.price
+          : candle.close <= breakout.price
+      );
+
+      const shallowPullbackSeen = postBreakoutCandles.slice(1, -1).some((candle) =>
+        breakout.direction === 'BULLISH'
+          ? candle.low >= Math.max(breakout.price, shallowPullbackFloor) && candle.close <= candle.open
+          : candle.high <= Math.min(breakout.price, shallowPullbackFloor) && candle.close >= candle.open
+      );
+
+      const continuationConfirmed = breakout.direction === 'BULLISH'
+        ? lastCandle.close > previousCandle.high
+        : lastCandle.close < previousCandle.low;
+
+      if (heldBreakoutSide && shallowPullbackSeen && continuationConfirmed) {
+        return {
+          ...breakout,
+          continuationDetected: true,
+          continuationIndex: candles.length - 1,
+          continuationCandle: lastCandle.time,
+          pullbackType: 'SHALLOW_PULLBACK',
+          score: 2,
+          description: `${breakout.level} breakout continuation after shallow pullback`,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Detect Rejection Candle
    * Bullish: Lower wick > body, close near high
    * Bearish: Upper wick > body, close near low

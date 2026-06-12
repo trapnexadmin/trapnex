@@ -220,29 +220,29 @@ class StrategyRunner {
         const bestSignal = sortedSignals[0];
         this.lastSignalTime = Date.now();
 
-        // // Save signal to MongoDB (async, non-blocking)
-        // dbService
-        //   .saveSignal(bestSignal, analysis, {
-        //     score: bestSignal.score,
-        //     grade: bestSignal.grade,
-        //     breakdown: bestSignal.breakdown,
-        //     tradeable: true,
-        //   })
-        //   .then((result) => {
-        //     if (result.saved) {
-        //       this.lastSignalId = result.signalId;
-        //       console.log(
-        //         `[Strategy] ✓ Signal saved to MongoDB (ID: ${result.signalId})`,
-        //       );
-        //     } else {
-        //       console.log(
-        //         `[Strategy] ⚠ Signal not saved: ${result.reason || result.error}`,
-        //       );
-        //     }
-        //   })
-        //   .catch((err) => {
-        //     console.error(`[Strategy] ✗ Signal save error:`, err.message);
-        //   });
+        // Save signal to MongoDB (async, non-blocking)
+        dbService
+          .saveSignal(bestSignal, analysis, {
+            score: bestSignal.score,
+            grade: bestSignal.grade,
+            breakdown: bestSignal.breakdown,
+            tradeable: true,
+          })
+          .then((result) => {
+            if (result.saved) {
+              this.lastSignalId = result.signalId;
+              console.log(
+                `[Strategy] ✓ Signal saved to MongoDB (ID: ${result.signalId})`,
+              );
+            } else {
+              console.log(
+                `[Strategy] ⚠ Signal not saved: ${result.reason || result.error}`,
+              );
+            }
+          })
+          .catch((err) => {
+            console.error(`[Strategy] ✗ Signal save error:`, err.message);
+          });
 
         // Open trade
         const trade = this.pnlTracker.openTrade({
