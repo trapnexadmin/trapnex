@@ -46,6 +46,9 @@ const retestTracker = new LevelRetestTracker();
 const EXPLOSIVE_BREAKOUT_THRESHOLD = 70;
 const RANGE_REJECTION_SCORE_BOOST = 3.5;
 const MIN_RANGE_REJECTIONS = 2;
+const TRIANGLE_LOOKBACK_CANDLES = 8;
+const TRIANGLE_TOLERANCE_POINTS = 3;
+const TRIANGLE_BREAKOUT_BUFFER = 10;
 
 function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   if (!previousDayHLC) return null;
@@ -311,6 +314,13 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     atr,
     strongCandle,
   );
+  const compressionZone = detectCompressionZone(
+    candles3m,
+    supportResistance,
+    levelInteraction,
+    atr,
+    volumeConfirmation,
+  );
 
   // === MULTI-TIMEFRAME CONFIRMATION ===
   // Check if 3m and 15m trends align for higher confidence
@@ -359,6 +369,9 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
 
     // V3 FIX: Add price structure score
     priceStructure: priceStructure?.score || 0,
+
+    // V3: Compression / triangle pattern scoring
+    compressionZone,
   });
 
   // === SIGNAL GENERATION ===
@@ -450,6 +463,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     signalOptions = {},
   ) {
     let adjustedScoring = { ...scoringResult };
+    const isCompressionPattern = signalOptions.patternType === "COMPRESSION";
+    let grade = adjustedScoring.grade;
 
     // V3 FIX: Apply score penalty for opposite direction trades
     if (isOpposite) {
@@ -488,7 +503,28 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       );
     }
 
-    const grade = adjustedScoring.grade;
+    let tradeable = adjustedScoring.tradeable;
+    let autoExecute = adjustedScoring.autoExecute;
+
+    if (isCompressionPattern && (signalOptions.patternConfirmed || source === "TRIANGLE_BREAKOUT")) {
+      adjustedScoring.score = Math.max(13, adjustedScoring.score + 3);
+      adjustedScoring.grade = adjustedScoring.score >= 16 ? "A+" : "A";
+      tradeable = true;
+      autoExecute = false;
+      adjustedScoring.breakdown = [
+        ...(Array.isArray(adjustedScoring.breakdown)
+          ? adjustedScoring.breakdown
+          : []),
+        {
+          factor: "⚠️ Triangle Grade Gate",
+          points: 0,
+          critical: true,
+          description: "Triangle setup promoted to A after confirmed breakout",
+        },
+      ];
+    }
+
+    grade = adjustedScoring.grade;
     const targets = getTargetsForGrade(
       grade,
       signalOptions.targetProfile || "default",
@@ -533,10 +569,10 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       score: adjustedScoring.score,
       grade: adjustedScoring.grade,
       breakdown: adjustedScoring.breakdown,
-      tradeable: adjustedScoring.tradeable,
-      autoExecute: adjustedScoring.autoExecute,
+      tradeable,
+      autoExecute,
       targetProfile: signalOptions.targetProfile || "default",
-      description: `${type} ${source} @ ${level || "CPR"} | Grade ${grade} | SL:${targets[0]}pt T:${targets.join("/")}pt${isOpposite ? " (OPPOSITE)" : ""}`,
+      description: `${type} ${source} @ ${level || "CPR"} | Grade ${grade} | SL:${targets[0]}pt T:${targets.join("/")}pt${isOpposite ? " (OPPOSITE)" : ""}${isCompressionPattern ? " (TRIANGLE)" : ""}`,
     };
   }
 
@@ -650,12 +686,20 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   const isInsideCPR = cprState?.state === "INSIDE";
   const isWideCPR = cpr.width > 50; // Wide CPR exception (50+ points)
   const allowInsideCPR = isInsideCPR && isWideCPR;
+  const compressionBlocked =
+    compressionZone?.state === "BUILDING" ||
+    compressionZone?.state === "BREAKOUT_WATCH";
 
   if (isInsideCPR && !isWideCPR) {
     console.log(
       `[Strategy] ❌ BLOCKED: Inside CPR (width: ${round(cpr.width)}pts < 50pts) - No edge, waiting for breakout`,
     );
     // Don't generate any signals when inside narrow CPR
+    signals = [];
+  } else if (compressionBlocked) {
+    console.log(
+      `[Strategy] ❌ BLOCKED: ${compressionZone.patternLabel || "Compression"} ${compressionZone.state.toLowerCase()} - no trade inside triangle`,
+    );
     signals = [];
   } else {
     // V3 STRICT: All signals MUST have retest or hold confirmation
@@ -665,7 +709,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       continuationDetected ||
       explosiveBreakoutDetected ||
       rangeRejectionSetup ||
-      quickReversalSetup;
+      quickReversalSetup ||
+      compressionZone?.breakoutConfirmed;
 
     if (!hasProperStructure) {
       console.log(
@@ -856,6 +901,54 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         signals.push(sig);
       }
 
+      // Setup 2F: Compression / Triangle breakout with confirmation
+      if (compressionZone?.breakoutConfirmed && mtfConfirmed) {
+        const type = compressionZone.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = compressionZone.breakoutLevel || lastPrice;
+        const triangleScoring = {
+          ...scoring,
+          score: Math.max(13, (scoring.score || 0) + 3),
+          grade: (scoring.score || 0) + 3 >= 16 ? "A+" : "A",
+          tradeable: true,
+          autoExecute: false,
+          breakdown: [
+            ...(Array.isArray(scoring.breakdown) ? scoring.breakdown : []),
+            {
+              factor: compressionZone.patternLabel || "Triangle",
+              points: 5,
+              critical: true,
+              description:
+                compressionZone.breakoutDescription ||
+                compressionZone.description,
+            },
+          ],
+        };
+
+        console.log(
+          `[Strategy] ✅ TRIANGLE_BREAKOUT: ${type} @ ${compressionZone.patternLabel} | Score: ${triangleScoring.score} | ${triangleScoring.grade}`,
+        );
+
+        const sig = buildV3Signal(
+          type,
+          entry,
+          levelPrice,
+          "TRIANGLE_BREAKOUT",
+          compressionZone.patternLabel,
+          atr,
+          triangleScoring,
+          false,
+          {
+            targetProfile: "compact",
+            patternType: "COMPRESSION",
+            patternConfirmed: true,
+          },
+        );
+        sig.tradeable = true;
+        sig.autoExecute = false;
+        signals.push(sig);
+      }
+
       // Setup 2C: One-candle explosive breakout (50+ pts beyond broken level)
       if (
         explosiveBreakoutDetected &&
@@ -988,19 +1081,21 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     executionReason:
       executableSignals.length > 0
         ? executableSignals[0].source
-        : isInsideCPR && !isWideCPR
-          ? "BLOCKED_INSIDE_CPR"
-          : !(
-                retestDetected ||
-                holdConfirmed ||
-                continuationDetected ||
-                explosiveBreakoutDetected ||
-                rangeRejectionSetup
-              )
-            ? "WAITING_STRUCTURE_CONFIRMATION"
-            : scoring.score < 12
-              ? "WAITING_SCORE_UPGRADE"
-              : "WAITING_REJECTION_ALIGNMENT",
+        : compressionBlocked
+          ? "BLOCKED_IN_COMPRESSION"
+          : isInsideCPR && !isWideCPR
+            ? "BLOCKED_INSIDE_CPR"
+            : !(
+                  retestDetected ||
+                  holdConfirmed ||
+                  continuationDetected ||
+                  explosiveBreakoutDetected ||
+                  rangeRejectionSetup
+                )
+              ? "WAITING_STRUCTURE_CONFIRMATION"
+              : scoring.score < 12
+                ? "WAITING_SCORE_UPGRADE"
+                : "WAITING_REJECTION_ALIGNMENT",
   };
 
   return {
@@ -1029,6 +1124,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     rangeRejectionSetup,
     rejectionCandle,
     priceStructure, // V3 FIX: Price structure detection
+    compressionZone,
 
     // Candle & Volume
     strongCandle,
@@ -1075,6 +1171,159 @@ function getTrend(candles) {
   if (closes[2] > closes[0]) return "BULLISH";
   if (closes[2] < closes[0]) return "BEARISH";
   return "NEUTRAL";
+}
+
+function detectCompressionZone(
+  candles,
+  supportResistance,
+  levelInteraction,
+  atr,
+  volumeConfirmation,
+) {
+  if (!candles || candles.length < TRIANGLE_LOOKBACK_CANDLES) return null;
+
+  const recent = candles.slice(-TRIANGLE_LOOKBACK_CANDLES);
+  const highs = recent.map((c) => c.high);
+  const lows = recent.map((c) => c.low);
+  const lastCandle = recent[recent.length - 1];
+  const lastClose = lastCandle.close;
+  const tolerance = Math.max(TRIANGLE_TOLERANCE_POINTS, atr * 0.15, 3);
+  const breakoutBuffer = Math.max(TRIANGLE_BREAKOUT_BUFFER, atr * 0.4, 6);
+  const volumeRatio = volumeConfirmation?.volumeRatio || 0;
+  const candleRange = Math.max(lastCandle.high - lastCandle.low, 0.01);
+  const candleBody = Math.abs(lastCandle.close - lastCandle.open);
+  const strongFollowThrough = candleBody / candleRange >= 0.55;
+
+  const descendingHighs = highs[0] > highs[highs.length - 1];
+  const ascendingLows = lows[0] < lows[lows.length - 1];
+
+  let lowerHighs = true;
+  let higherLows = true;
+  let equalHighs = true;
+  let equalLows = true;
+
+  for (let i = 1; i < highs.length; i++) {
+    if (highs[i] > highs[i - 1] - tolerance) {
+      lowerHighs = false;
+    }
+    if (Math.abs(highs[i] - highs[i - 1]) > tolerance) {
+      equalHighs = false;
+    }
+  }
+
+  for (let i = 1; i < lows.length; i++) {
+    if (lows[i] < lows[i - 1] + tolerance) {
+      higherLows = false;
+    }
+    if (Math.abs(lows[i] - lows[i - 1]) > tolerance) {
+      equalLows = false;
+    }
+  }
+
+  const rangeHigh = Math.max(...highs);
+  const rangeLow = Math.min(...lows);
+  const rangeWidth = rangeHigh - rangeLow;
+  const contractingRange = rangeWidth <= Math.max(atr * 2.5, 20);
+
+  let pattern = null;
+  let patternLabel = null;
+  let breakoutDirection = null;
+  let breakoutLevel = null;
+
+  if (lowerHighs && equalLows) {
+    pattern = "DESCENDING_TRIANGLE";
+    patternLabel = "Descending Triangle";
+    breakoutDirection =
+      lastClose > rangeHigh
+        ? "BULLISH"
+        : lastClose < rangeLow
+          ? "BEARISH"
+          : null;
+    breakoutLevel = breakoutDirection === "BULLISH" ? rangeHigh : rangeLow;
+  } else if (equalHighs && higherLows) {
+    pattern = "ASCENDING_TRIANGLE";
+    patternLabel = "Ascending Triangle";
+    breakoutDirection =
+      lastClose > rangeHigh
+        ? "BULLISH"
+        : lastClose < rangeLow
+          ? "BEARISH"
+          : null;
+    breakoutLevel = breakoutDirection === "BULLISH" ? rangeHigh : rangeLow;
+  } else if (lowerHighs && higherLows) {
+    pattern = "SYMMETRICAL_TRIANGLE";
+    patternLabel = "Symmetrical Triangle";
+    breakoutDirection =
+      lastClose > rangeHigh
+        ? "BULLISH"
+        : lastClose < rangeLow
+          ? "BEARISH"
+          : null;
+    breakoutLevel = breakoutDirection === "BULLISH" ? rangeHigh : rangeLow;
+  } else if (equalHighs && equalLows && contractingRange) {
+    pattern = "RANGE";
+    patternLabel = "Compression Range";
+    breakoutDirection =
+      lastClose > rangeHigh
+        ? "BULLISH"
+        : lastClose < rangeLow
+          ? "BEARISH"
+          : null;
+    breakoutLevel = breakoutDirection === "BULLISH" ? rangeHigh : rangeLow;
+  } else if (contractingRange && (descendingHighs || ascendingLows)) {
+    pattern = "FLAG_PENNANT";
+    patternLabel = descendingHighs && ascendingLows ? "Pennant" : "Flag";
+    breakoutDirection =
+      lastClose > rangeHigh
+        ? "BULLISH"
+        : lastClose < rangeLow
+          ? "BEARISH"
+          : null;
+    breakoutLevel = breakoutDirection === "BULLISH" ? rangeHigh : rangeLow;
+  }
+
+  if (!pattern) return null;
+
+  const breakoutConfirmed =
+    breakoutDirection &&
+    ((breakoutDirection === "BULLISH" &&
+      lastClose > breakoutLevel + breakoutBuffer) ||
+      (breakoutDirection === "BEARISH" &&
+        lastClose < breakoutLevel - breakoutBuffer)) &&
+    (volumeRatio >= 1.2 || strongFollowThrough);
+
+  const breakoutWatch =
+    !breakoutConfirmed &&
+    ((breakoutDirection === "BULLISH" &&
+      breakoutLevel &&
+      breakoutLevel - lastClose <= breakoutBuffer) ||
+      (breakoutDirection === "BEARISH" &&
+        breakoutLevel &&
+        lastClose - breakoutLevel <= breakoutBuffer));
+
+  return {
+    detected: true,
+    pattern,
+    patternLabel,
+    state: breakoutConfirmed
+      ? "CONFIRMED_ENTRY"
+      : breakoutWatch
+        ? "BREAKOUT_WATCH"
+        : "BUILDING",
+    direction: breakoutDirection,
+    breakoutLevel,
+    rangeHigh: round(rangeHigh),
+    rangeLow: round(rangeLow),
+    rangeWidth: round(rangeWidth),
+    breakoutConfirmed,
+    breakoutWatch,
+    volumeRatio: round(volumeRatio),
+    strongFollowThrough,
+    description: `${patternLabel} ${breakoutConfirmed ? "breakout confirmed" : breakoutWatch ? "breakout watch" : "building"}`,
+    breakoutDescription: breakoutConfirmed
+      ? `${patternLabel} breakout confirmed`
+      : null,
+  };
 }
 
 function detectRangeRejectionSetup(

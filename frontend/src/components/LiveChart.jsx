@@ -17,6 +17,27 @@ export default function LiveChart({
   const cprLinesRef = useRef([]);
   const srLinesRef = useRef([]);
   const [countdown, setCountdown] = useState(closingSeconds);
+  const compressionZone = analysis?.compressionZone;
+  const triangleState = compressionZone?.state;
+  const triangleBadge = triangleState
+    ? {
+        BUILDING: {
+          label: "TRIANGLE BUILDING",
+          className:
+            "bg-amber-500/10 border border-amber-400/25 text-amber-300",
+        },
+        BREAKOUT_WATCH: {
+          label: "TRIANGLE BREAKOUT WATCH",
+          className:
+            "bg-cyan-500/10 border border-cyan-400/25 text-cyan-300",
+        },
+        CONFIRMED_ENTRY: {
+          label: "TRIANGLE CONFIRMED ENTRY",
+          className:
+            "bg-brand-green/10 border border-brand-green/25 text-brand-green",
+        },
+      }[triangleState] || null
+    : null;
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -327,6 +348,15 @@ export default function LiveChart({
               Closes in: <span className="text-lg">{countdown}s</span>
             </span>
           </div>
+
+          {triangleBadge && (
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide ${triangleBadge.className}`}
+            >
+              <div className="w-2 h-2 rounded-full bg-current pulse-live" />
+              <span>{triangleBadge.label}</span>
+            </div>
+          )}
 
           {/* AM Zone indicator */}
           {analysis?.amZone?.detected && (

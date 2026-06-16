@@ -1,6 +1,9 @@
-import { motion } from 'framer-motion';
+import { useState } from "react";
+import { motion } from "framer-motion";
 
-export default function PnLCard({ trade }) {
+export default function PnLCard({ trade, onExitAllPositions }) {
+  const [isExiting, setIsExiting] = useState(false);
+
   if (!trade) {
     return (
       <div className="glass p-5">
@@ -19,10 +22,23 @@ export default function PnLCard({ trade }) {
   const targetPoints = trade.targetPoints || [];
   const targetsHit = trade.targetsHit || [];
 
+  const handleExitClick = async () => {
+    if (!onExitAllPositions || isExiting) return;
+
+    setIsExiting(true);
+    try {
+      await onExitAllPositions();
+    } finally {
+      setIsExiting(false);
+    }
+  };
+
   return (
     <motion.div
-      className={`glass p-5 ${isProfit ? 'glow-green' : 'glow-red'}`}
-      animate={{ borderColor: isProfit ? 'rgba(34,255,136,0.2)' : 'rgba(255,77,79,0.2)' }}
+      className={`glass p-5 ${isProfit ? "glow-green" : "glow-red"}`}
+      animate={{
+        borderColor: isProfit ? "rgba(34,255,136,0.2)" : "rgba(255,77,79,0.2)",
+      }}
     >
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-medium text-brand-muted uppercase tracking-wider">
@@ -30,15 +46,23 @@ export default function PnLCard({ trade }) {
         </span>
         <div className="flex items-center gap-2">
           {trade.grade && (
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-              trade.grade === 'A+' ? 'bg-brand-green/15 text-brand-green' :
-              trade.grade === 'A' ? 'bg-brand-blue/15 text-brand-blue' :
-              'bg-cyan-500/15 text-cyan-400'
-            }`}>{trade.grade}</span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                trade.grade === "A+"
+                  ? "bg-brand-green/15 text-brand-green"
+                  : trade.grade === "A"
+                    ? "bg-brand-blue/15 text-brand-blue"
+                    : "bg-cyan-500/15 text-cyan-400"
+              }`}
+            >
+              {trade.grade}
+            </span>
           )}
-          <span className={`text-xs font-medium ${
-            trade.type === 'CALL' ? 'text-brand-green' : 'text-brand-red'
-          }`}>
+          <span
+            className={`text-xs font-medium ${
+              trade.type === "CALL" ? "text-brand-green" : "text-brand-red"
+            }`}
+          >
             {trade.type}
           </span>
         </div>
@@ -48,19 +72,23 @@ export default function PnLCard({ trade }) {
       <div className="text-center mb-4">
         <motion.div
           className={`text-4xl font-bold font-mono tabular-nums ${
-            isProfit ? 'text-brand-green' : 'text-brand-red'
+            isProfit ? "text-brand-green" : "text-brand-red"
           }`}
           key={trade.pnl}
           initial={{ scale: 1.05 }}
           animate={{ scale: 1 }}
           transition={{ duration: 0.15 }}
         >
-          {isProfit ? '+' : ''}{trade.pnl?.toFixed(2)}
+          {isProfit ? "+" : ""}
+          {trade.pnl?.toFixed(2)}
         </motion.div>
-        <div className={`text-sm font-mono mt-1 ${
-          isProfit ? 'text-brand-green/70' : 'text-brand-red/70'
-        }`}>
-          {isProfit ? '+' : ''}{trade.pnlPercent?.toFixed(2)}%
+        <div
+          className={`text-sm font-mono mt-1 ${
+            isProfit ? "text-brand-green/70" : "text-brand-red/70"
+          }`}
+        >
+          {isProfit ? "+" : ""}
+          {trade.pnlPercent?.toFixed(2)}%
         </div>
       </div>
 
@@ -75,12 +103,27 @@ export default function PnLCard({ trade }) {
           <span className="font-mono">{trade.currentPrice?.toFixed(2)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-brand-muted">SL {trade.trailActive ? '(Trail)' : ''}</span>
-          <span className={`font-mono ${trade.trailActive ? 'text-brand-blue' : 'text-brand-red'}`}>
+          <span className="text-brand-muted">
+            SL {trade.trailActive ? "(Trail)" : ""}
+          </span>
+          <span
+            className={`font-mono ${trade.trailActive ? "text-brand-blue" : "text-brand-red"}`}
+          >
             {trade.stopLoss?.toFixed(2)}
           </span>
         </div>
       </div>
+
+      {onExitAllPositions && (
+        <button
+          type="button"
+          onClick={handleExitClick}
+          disabled={isExiting}
+          className="w-full mb-3 rounded-lg border border-brand-red/30 bg-brand-red/10 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-brand-red transition-colors hover:bg-brand-red/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isExiting ? "Exiting..." : "Exit All Positions"}
+        </button>
+      )}
 
       {/* Multi-target progress */}
       {targets.length > 0 && (
@@ -91,16 +134,16 @@ export default function PnLCard({ trade }) {
           <div className="flex gap-1 flex-wrap">
             {targets.map((tgt, i) => {
               const isHit = targetsHit.includes(i);
-              const isCurrent = !isHit && i === (targetsHit.length);
+              const isCurrent = !isHit && i === targetsHit.length;
               return (
                 <div
                   key={i}
                   className={`flex-1 min-w-[40px] text-center py-1 rounded text-[10px] font-mono font-semibold border transition-colors ${
                     isHit
-                      ? 'bg-brand-green/20 text-brand-green border-brand-green/30'
+                      ? "bg-brand-green/20 text-brand-green border-brand-green/30"
                       : isCurrent
-                        ? 'bg-brand-blue/10 text-brand-blue border-brand-blue/30 animate-pulse'
-                        : 'bg-white/5 text-brand-muted border-white/10'
+                        ? "bg-brand-blue/10 text-brand-blue border-brand-blue/30 animate-pulse"
+                        : "bg-white/5 text-brand-muted border-white/10"
                   }`}
                 >
                   <div className="text-[9px] mb-0.5 opacity-70">T{i + 1}</div>

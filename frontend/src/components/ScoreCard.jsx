@@ -12,19 +12,21 @@ export default function ScoreCard({ scoring }) {
     );
   }
 
-  const gradeColor = {
-    'A+': 'text-brand-green',
-    A: 'text-brand-blue',
-    'B+': 'text-cyan-400',
-    B: 'text-yellow-400',
-    C: 'text-brand-muted',
-  }[scoring.grade] || 'text-brand-muted';
+  const gradeColor =
+    {
+      "A+": "text-brand-green",
+      A: "text-brand-blue",
+      "B+": "text-cyan-400",
+      B: "text-yellow-400",
+      C: "text-brand-muted",
+    }[scoring.grade] || "text-brand-muted";
 
-  const gradeGlow = {
-    'A+': 'glow-green',
-    A: 'glow-blue',
-    'B+': 'glow-cyan',
-  }[scoring.grade] || '';
+  const gradeGlow =
+    {
+      "A+": "glow-green",
+      A: "glow-blue",
+      "B+": "glow-cyan",
+    }[scoring.grade] || "";
 
   return (
     <div className={`glass p-5 ${gradeGlow}`}>
@@ -69,11 +71,11 @@ export default function ScoreCard({ scoring }) {
       <div className="mt-4 pt-3 border-t border-brand-border text-center">
         <span
           className={`text-xs font-medium ${
-            scoring.tradeable ? 'text-brand-green' : 'text-brand-muted'
+            scoring.tradeable ? "text-brand-green" : "text-brand-muted"
           }`}
         >
-          {scoring.tradeable 
-            ? `✓ TRADEABLE — ${scoring.grade} Setup` 
+          {scoring.tradeable
+            ? `✓ TRADEABLE — ${scoring.grade} Setup`
             : `Waiting for better setup... (${scoring.grade})`}
         </span>
       </div>

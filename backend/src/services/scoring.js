@@ -43,6 +43,7 @@ function scoreMarketStructure({
   cprSROverlap, // CPR + S/R zone overlap (+3)
   mtfAligned, // Multi-timeframe alignment (+2)
   priceStructure = 0, // V3 FIX: Price structure score (+1-2)
+  compressionZone = null, // Triangle/flag/pennant/range compression
 }) {
   let score = 0;
   const breakdown = [];
@@ -225,6 +226,36 @@ function scoreMarketStructure({
     breakdown.push({
       factor: priceStructure === 2 ? "🔥 Strong Structure" : "Structure",
       points: priceStructure,
+    });
+  }
+
+  // === V3: COMPRESSION / TRIANGLE PATTERN ===
+  if (compressionZone?.detected) {
+    score += 1;
+    breakdown.push({
+      factor: `📐 ${compressionZone.patternLabel || "Compression Zone"}`,
+      points: 1,
+      description: compressionZone.description,
+    });
+  }
+
+  if (compressionZone?.state === "BUILDING") {
+    score -= 2;
+    breakdown.push({
+      factor: "⚠️ Inside Compression",
+      points: -2,
+      critical: true,
+      description: compressionZone.description,
+    });
+  }
+
+  if (compressionZone?.breakoutConfirmed) {
+    score += 3;
+    breakdown.push({
+      factor: "🚀 Triangle Breakout Confirmed",
+      points: 3,
+      critical: true,
+      description: compressionZone.breakoutDescription,
     });
   }
 

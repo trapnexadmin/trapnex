@@ -53,6 +53,29 @@ export default function App() {
     }
   }, []);
 
+  const handleExitAllPositions = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Exit all positions now? This will close the active trade.",
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch("/api/trade/close", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to close active trade");
+      }
+
+      await fetchJournal();
+    } catch (err) {
+      console.error("[App] Failed to close active trade:", err);
+      window.alert("Unable to exit positions right now. Please try again.");
+    }
+  }, [fetchJournal]);
+
   useEffect(() => {
     fetchJournal();
     const iv = setInterval(fetchJournal, 10000);
@@ -154,7 +177,10 @@ export default function App() {
                 )}
               </AnimatePresence>
 
-              <PnLCard trade={ws.activeTrade} />
+              <PnLCard
+                trade={ws.activeTrade}
+                onExitAllPositions={handleExitAllPositions}
+              />
             </div>
           </div>
 

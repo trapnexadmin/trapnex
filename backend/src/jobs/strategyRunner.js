@@ -4,8 +4,20 @@
  */
 
 const { analyzeSetup } = require("../services/strategy");
-const { sendAlert, sendDailyPnLSummary } = require("../services/telegram");
+const {
+  sendAlert,
+  sendTradeUpdateAlert,
+  sendTradeClosedSummary,
+  sendDailyPnLSummary,
+} = require("../services/telegram");
 const dbService = require("../db/service");
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function getISTDateKey(value) {
+  const date = new Date((value ? new Date(value).getTime() : Date.now()) + IST_OFFSET_MS);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
 
 class StrategyRunner {
   constructor(candleBuilder, pnlTracker, journal) {
@@ -45,8 +57,27 @@ class StrategyRunner {
 
     // Update PnL if trade active
     const pnlUpdate = this.pnlTracker.updatePrice(tick.price);
+    if (pnlUpdate?.event === "TARGET_HIT") {
+      sendTradeUpdateAlert(pnlUpdate.trade, {
+        event: pnlUpdate.event,
+        targetIdx: pnlUpdate.targetIdx,
+        targetPrice: pnlUpdate.targetPrice,
+        targetLabel: pnlUpdate.targetLabel,
+        remainingPosition: pnlUpdate.remainingPosition,
+        currentPrice: tick.price,
+      }).catch(() => {});
+    }
+
+    if (pnlUpdate?.event === "CLOSED" && pnlUpdate.trade?.reason === "STOP_LOSS") {
+      sendTradeUpdateAlert(pnlUpdate.trade, {
+        event: "STOP_LOSS",
+        currentPrice: tick.price,
+      }).catch(() => {});
+    }
+
     if (pnlUpdate?.event === "CLOSED") {
       this.journal.addTrade(pnlUpdate.trade);
+      sendTradeClosedSummary(pnlUpdate.trade).catch(() => {});
 
       // Update trade in MongoDB (async, non-blocking)
       if (pnlUpdate.trade._dbId) {
@@ -397,13 +428,14 @@ class StrategyRunner {
         this.dailyPnLSent = true;
         console.log("[Strategy] 📊 Sending daily P&L summary to Telegram...");
         const history = this.journal.getTrades
-          ? this.journal.getTrades()
+          ? this.journal.getTrades(200)
           : this.journal.trades || [];
+        const todayKey = getISTDateKey(Date.now());
         const todayTrades = history.filter((t) => {
-          const tradeDate = new Date(t.openTime || t.closeTime);
-          return tradeDate.toDateString() === new Date().toDateString();
+          const tradeKey = getISTDateKey(t.closeTime || t.openTime || t.createdAt || t.timestamp);
+          return tradeKey === todayKey;
         });
-        const stats = this.pnlTracker.getStats();
+        const stats = this.journal.getStats ? this.journal.getStats() : this.pnlTracker.getStats();
         sendDailyPnLSummary(stats, todayTrades).catch(() => {});
       }
 
@@ -430,6 +462,7 @@ class StrategyRunner {
 
           if (pnlUpdate) {
             this.journal.addTrade(pnlUpdate.trade);
+            sendTradeClosedSummary(pnlUpdate.trade).catch(() => {});
             console.log(
               `[Strategy] ✓ Trade closed at market close | P&L: ${pnlUpdate.trade.pnl} (${pnlUpdate.trade.pnlPercent}%)`,
             );

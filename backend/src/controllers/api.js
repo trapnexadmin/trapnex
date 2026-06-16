@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const dbService = require('../db/service');
+const { sendTradeClosedSummary } = require('../services/telegram');
 
 function normalizeTrade(trade) {
   if (!trade) return null;
@@ -128,6 +129,7 @@ function createControllers(strategyRunner, journal) {
     const result = strategyRunner.pnlTracker.closeTrade('MANUAL', lastPrice);
     if (result) {
       journal.addTrade(result.trade);
+      sendTradeClosedSummary(result.trade).catch(() => {});
       res.json(result);
     } else {
       res.status(400).json({ error: 'No active trade to close' });
