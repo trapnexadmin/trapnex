@@ -178,6 +178,13 @@ class DatabaseService {
           price: trade.entry,
           time: new Date(trade.openTime || trade.timestamp || Date.now()),
         },
+        exit: trade.exit
+          ? {
+              price: trade.exit.price,
+              time: new Date(trade.exit.time || trade.closeTime || Date.now()),
+              reason: trade.exit.reason || trade.reason || null,
+            }
+          : undefined,
         stopLoss: trade.stopLoss,
         initialSL: trade.initialSL || trade.stopLoss,
         target: trade.target,
@@ -247,12 +254,25 @@ class DatabaseService {
     }
   }
 
+  async getLatestOpenTrade() {
+    if (!isDBConnected()) return null;
+
+    try {
+      return await Trade.findOne({ symbol: this.symbol, status: "OPEN" })
+        .sort({ "entry.time": -1, createdAt: -1 })
+        .lean();
+    } catch (err) {
+      console.error("[DB] Error loading latest open trade:", err.message);
+      return null;
+    }
+  }
+
   async getTradesWithFilter(filter, limit = 50) {
     if (!isDBConnected()) return [];
 
     try {
       return await Trade.find({ symbol: this.symbol, ...filter })
-        .sort({ 'entry.time': -1 })
+        .sort({ "entry.time": -1 })
         .limit(limit)
         .lean();
     } catch (err) {

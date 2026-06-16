@@ -239,15 +239,15 @@ function scoreMarketStructure({
     });
   }
 
-  if (compressionZone?.state === "BUILDING") {
-    score -= 2;
-    breakdown.push({
-      factor: "⚠️ Inside Compression",
-      points: -2,
-      critical: true,
-      description: compressionZone.description,
-    });
-  }
+  // if (compressionZone?.state === "BUILDING") {
+  //   score -= 2;
+  //   breakdown.push({
+  //     factor: "⚠️ Inside Compression",
+  //     points: -2,
+  //     critical: true,
+  //     description: compressionZone.description,
+  //   });
+  // }
 
   if (compressionZone?.breakoutConfirmed) {
     score += 3;

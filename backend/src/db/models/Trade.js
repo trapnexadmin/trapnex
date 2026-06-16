@@ -32,6 +32,14 @@ const tradeSchema = new mongoose.Schema({
       enum: ['TARGET', 'TARGET_HIT', 'STOP_LOSS', 'MANUAL', 'EOD', 'MARKET_CLOSED'],
     }
   },
+  exits: [{
+    price: Number,
+    time: Date,
+    reason: {
+      type: String,
+      enum: ['TARGET', 'TARGET_HIT', 'STOP_LOSS', 'MANUAL', 'EOD', 'MARKET_CLOSED'],
+    }
+  }],
   stopLoss: Number,
   initialSL: Number,
   target: Number,       // primary (last) target

@@ -166,10 +166,16 @@ class PnLTracker {
     if (!this.activeTrade) return null;
 
     const ep = exitPrice || this.activeTrade.currentPrice;
+    const exitRecord = {
+      price: ep,
+      time: Date.now(),
+      reason,
+    };
 
     const trade = {
       ...this.activeTrade,
       exitPrice: ep,
+      exit: exitRecord,
       closeTime: Date.now(),
       reason,
       status: "CLOSED",

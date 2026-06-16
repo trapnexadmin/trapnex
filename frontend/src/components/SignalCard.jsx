@@ -7,6 +7,9 @@ export default function SignalCard({ signal, scoring }) {
   const targets = signal.targets || (signal.target ? [signal.target] : []);
   const targetPoints = signal.targetPoints || [];
   const isCompactTargetProfile = signal.targetProfile === 'compact';
+  const levelType = signal.levelType || 'STRUCTURE';
+  const levelLabel = signal.levelLabel || signal.level || 'N/A';
+  const levelSide = signal.levelSide || 'N/A';
   const sourceLabel = {
     RETEST_CONFIRMED: 'Retest Confirmed',
     RETEST_PENDING: 'Retest Pending',
@@ -86,6 +89,10 @@ export default function SignalCard({ signal, scoring }) {
       <div className="space-y-2 mb-3">
         <Row label="Entry" value={signal.entry} color="text-brand-text" />
         <Row label="Stop Loss" value={signal.stopLoss} color="text-brand-red" />
+        <Row label="Trigger Type" value={levelType} color="text-brand-blue" />
+        <Row label="Trigger Level" value={levelLabel} color="text-brand-text" />
+        <Row label="Trigger Side" value={levelSide} color="text-brand-muted" />
+        <Row label="Trigger Price" value={signal.levelPrice ?? signal.entry} color="text-brand-blue" />
         <div className="flex justify-between text-xs">
           <span className="text-brand-muted">R : R</span>
           <span className="font-mono font-semibold text-brand-blue">1 : {signal.riskReward}</span>

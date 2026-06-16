@@ -142,37 +142,62 @@ function detectRejectionCandle(candle, expectedDirection = null) {
 
   const lowerWick = Math.min(candle.open, candle.close) - candle.low;
   const upperWick = candle.high - Math.max(candle.open, candle.close);
+  const bullishRejection = lowerWick > body && (candle.high - candle.close) / range < 0.3;
+  const bearishRejection = upperWick > body && (candle.close - candle.low) / range < 0.3;
   
-  // Bullish Rejection
-  const isBullish = candle.close > candle.open;
-  const strongLowerWick = lowerWick > body;
-  const closeNearHigh = (candle.high - candle.close) / range < 0.3;
-  
-  if (isBullish && strongLowerWick && closeNearHigh) {
-    const wickRatio = body > 0 ? lowerWick / body : lowerWick;
-    return {
-      detected: true,
-      type: 'BULLISH_REJECTION',
-      score: 2,
-      strength: round(wickRatio),
-      description: 'Strong bullish rejection - buyers defended level',
-    };
-  }
+  if (expectedDirection === 'BULLISH') {
+    if (bullishRejection) {
+      const wickRatio = body > 0 ? lowerWick / body : lowerWick;
+      return {
+        detected: true,
+        type: 'BULLISH_REJECTION',
+        score: 2,
+        strength: round(wickRatio),
+        direction: 'BULLISH',
+        wick: 'LOWER',
+        description: 'Strong bullish rejection - buyers defended level',
+      };
+    }
+  } else if (expectedDirection === 'BEARISH') {
+    if (bearishRejection) {
+      const wickRatio = body > 0 ? upperWick / body : upperWick;
+      return {
+        detected: true,
+        type: 'BEARISH_REJECTION',
+        score: 2,
+        strength: round(wickRatio),
+        direction: 'BEARISH',
+        wick: 'UPPER',
+        description: 'Strong bearish rejection - sellers defended level',
+      };
+    }
+  } else {
+    // Direction-agnostic fallback for wick-based rejection detection.
+    if (bullishRejection && lowerWick >= upperWick) {
+      const wickRatio = body > 0 ? lowerWick / body : lowerWick;
+      return {
+        detected: true,
+        type: 'BULLISH_REJECTION',
+        score: 2,
+        strength: round(wickRatio),
+        direction: 'BULLISH',
+        wick: 'LOWER',
+        description: 'Strong bullish rejection - buyers defended level',
+      };
+    }
 
-  // Bearish Rejection
-  const isBearish = candle.close < candle.open;
-  const strongUpperWick = upperWick > body;
-  const closeNearLow = (candle.close - candle.low) / range < 0.3;
-  
-  if (isBearish && strongUpperWick && closeNearLow) {
-    const wickRatio = body > 0 ? upperWick / body : upperWick;
-    return {
-      detected: true,
-      type: 'BEARISH_REJECTION',
-      score: 2,
-      strength: round(wickRatio),
-      description: 'Strong bearish rejection - sellers defended level',
-    };
+    if (bearishRejection && upperWick >= lowerWick) {
+      const wickRatio = body > 0 ? upperWick / body : upperWick;
+      return {
+        detected: true,
+        type: 'BEARISH_REJECTION',
+        score: 2,
+        strength: round(wickRatio),
+        direction: 'BEARISH',
+        wick: 'UPPER',
+        description: 'Strong bearish rejection - sellers defended level',
+      };
+    }
   }
 
   return { detected: false };

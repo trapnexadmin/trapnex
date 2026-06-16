@@ -15,6 +15,7 @@ function normalizeTrade(trade) {
   const exitPrice = trade.exit?.price ?? trade.exitPrice ?? null;
   const exitTime = trade.exit?.time ?? trade.closeTime ?? null;
   const reason = trade.exit?.reason ?? trade.reason ?? null;
+  const exits = trade.exits ?? (trade.exit ? [trade.exit] : []);
   const pnlPoints = typeof trade.pnl === 'number' ? trade.pnl : trade.pnl?.points ?? 0;
   const pnlPercent = trade.pnlPercent ?? trade.pnl?.percentage ?? 0;
 
@@ -27,6 +28,7 @@ function normalizeTrade(trade) {
     exitPrice,
     exitTime,
     reason,
+    exits,
     pnl: pnlPoints,
     pnlPercent,
     openTime: trade.openTime ?? entryTime,
@@ -122,18 +124,89 @@ function createControllers(strategyRunner, journal) {
   });
 
   // Close active trade manually
-  router.post('/trade/close', (req, res) => {
+  router.post('/trade/close', async (req, res) => {
     const lastPrice = strategyRunner.candleBuilder.getLastPrice();
     if (!lastPrice) return res.status(400).json({ error: 'No price data' });
 
     const result = strategyRunner.pnlTracker.closeTrade('MANUAL', lastPrice);
+
     if (result) {
       journal.addTrade(result.trade);
       sendTradeClosedSummary(result.trade).catch(() => {});
-      res.json(result);
-    } else {
-      res.status(400).json({ error: 'No active trade to close' });
+
+      if (result.trade._dbId) {
+        await dbService.updateTrade(result.trade._dbId, {
+          exit: {
+            price: result.trade.exitPrice,
+            time: new Date(result.trade.closeTime),
+            reason: result.trade.reason,
+          },
+          exits: Array.isArray(result.trade.exits)
+            ? result.trade.exits.map((exit) => ({
+                price: exit.price,
+                time: new Date(exit.time || result.trade.closeTime),
+                reason: exit.reason || result.trade.reason,
+              }))
+            : [{
+                price: result.trade.exitPrice,
+                time: new Date(result.trade.closeTime),
+                reason: result.trade.reason,
+              }],
+          status: 'CLOSED',
+          result: result.trade.result,
+          'pnl.points': result.trade.pnl,
+          'pnl.percentage': result.trade.pnlPercent,
+          closeReason: result.trade.reason,
+          'metadata.duration': result.trade.closeTime - result.trade.openTime,
+        });
+      }
+
+      return res.json(result);
     }
+
+    const dbOpenTrade = await dbService.getLatestOpenTrade();
+    if (!dbOpenTrade) {
+      return res.status(400).json({ error: 'No active trade to close' });
+    }
+
+    const exitRecord = {
+      price: lastPrice,
+      time: new Date(),
+      reason: 'MANUAL',
+    };
+
+    const closedTrade = {
+      ...dbOpenTrade,
+      exitPrice: lastPrice,
+      exit: exitRecord,
+      exits: [...(dbOpenTrade.exits || []), exitRecord],
+      closeTime: Date.now(),
+      reason: 'MANUAL',
+      status: 'CLOSED',
+      pnl: dbOpenTrade.type === 'CALL'
+        ? Math.round((lastPrice - (dbOpenTrade.entry?.price ?? dbOpenTrade.entry ?? 0)) * 100) / 100
+        : Math.round(((dbOpenTrade.entry?.price ?? dbOpenTrade.entry ?? 0) - lastPrice) * 100) / 100,
+    };
+    closedTrade.pnlPercent = closedTrade.entry?.price || closedTrade.entry
+      ? Math.round((closedTrade.pnl / (closedTrade.entry?.price ?? closedTrade.entry)) * 10000) / 100
+      : 0;
+    closedTrade.result = closedTrade.pnl >= 0 ? 'WIN' : 'LOSS';
+
+    await dbService.updateTrade(dbOpenTrade._id, {
+      exit: exitRecord,
+      exits: closedTrade.exits,
+      status: 'CLOSED',
+      reason: 'MANUAL',
+      result: closedTrade.result,
+      'pnl.points': closedTrade.pnl,
+      'pnl.percentage': closedTrade.pnlPercent,
+      closeReason: 'MANUAL',
+      'metadata.duration': closedTrade.closeTime - (dbOpenTrade.entry?.time ? new Date(dbOpenTrade.entry.time).getTime() : new Date(dbOpenTrade.createdAt || Date.now()).getTime()),
+    });
+
+    journal.addTrade(closedTrade);
+    sendTradeClosedSummary(closedTrade).catch(() => {});
+    return res.json({ event: 'CLOSED', trade: closedTrade });
   });
 
   // Trade journal

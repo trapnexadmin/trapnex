@@ -56,6 +56,9 @@ function getCPRState(candles, cpr, currentPrice) {
       state: 'REJECTION',
       score: 3,
       details: rejection,
+      bias: rejection.direction,
+      level: rejection.direction === 'BULLISH' ? 'BC' : 'TC',
+      levelSide: rejection.direction === 'BULLISH' ? 'SUPPORT' : 'RESISTANCE',
       signalAllowed: true,
     };
   }

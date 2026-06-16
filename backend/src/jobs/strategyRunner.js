@@ -88,6 +88,17 @@ class StrategyRunner {
               time: new Date(pnlUpdate.trade.closeTime),
               reason: pnlUpdate.trade.reason,
             },
+            exits: Array.isArray(pnlUpdate.trade.exits)
+              ? pnlUpdate.trade.exits.map((exit) => ({
+                  price: exit.price,
+                  time: new Date(exit.time || pnlUpdate.trade.closeTime),
+                  reason: exit.reason || pnlUpdate.trade.reason,
+                }))
+              : [{
+                  price: pnlUpdate.trade.exitPrice,
+                  time: new Date(pnlUpdate.trade.closeTime),
+                  reason: pnlUpdate.trade.reason,
+                }],
             status: "CLOSED",
             result: pnlUpdate.trade.result,
             "pnl.points": pnlUpdate.trade.pnl,
@@ -308,7 +319,7 @@ class StrategyRunner {
           });
 
         console.log(
-          `[Strategy] 🎯 Executing signal: ${bestSignal.source} @ ${bestSignal.level || "CPR"} | Grade: ${bestSignal.grade} (${bestSignal.score}/10) | Confidence: ${(bestSignal.confidence * 100).toFixed(0)}%`,
+          `[Strategy] 🎯 Executing signal: ${bestSignal.source} @ ${bestSignal.levelLabel || bestSignal.level || "CPR"} | Grade: ${bestSignal.grade} (${bestSignal.score}/10) | Confidence: ${(bestSignal.confidence * 100).toFixed(0)}%`,
         );
 
         if (this.onSignal) {

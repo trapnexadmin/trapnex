@@ -313,7 +313,7 @@ export default function LiveChart({
   }, [analysis?.cpr, analysis?.supportResistance]);
 
   return (
-    <div className="glass p-4 h-[480px] flex flex-col">
+    <div className="glass p-4 h-[500px] flex flex-col">
       {/* Timeframe tabs */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1">
@@ -335,25 +335,25 @@ export default function LiveChart({
         {/* Candle Close Countdown */}
         <div className="flex items-center gap-3">
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono text-sm font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-1.5 py-1.5 rounded-lg font-mono text-sm font-bold transition-all ${
               countdown <= 10
                 ? "bg-brand-red/20 text-brand-red border border-brand-red/30 pulse-live"
                 : "bg-brand-blue/20 text-brand-blue border border-brand-blue/30"
             }`}
           >
             <div
-              className={`w-2 h-2 rounded-full ${countdown <= 10 ? "bg-brand-red pulse-live" : "bg-brand-blue"}`}
+              className={`w-1.5 h-1.5 rounded-full ${countdown <= 10 ? "bg-brand-red pulse-live" : "bg-brand-blue"}`}
             />
-            <span>
-              Closes in: <span className="text-lg">{countdown}s</span>
+            <span className="text-xs">
+              Closes in: <span className="text-xs">{countdown}s</span>
             </span>
           </div>
 
           {triangleBadge && (
             <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide ${triangleBadge.className}`}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold tracking-wide ${triangleBadge.className}`}
             >
-              <div className="w-2 h-2 rounded-full bg-current pulse-live" />
+              <div className="w-1.5 h-1.5 rounded-full bg-current pulse-live" />
               <span>{triangleBadge.label}</span>
             </div>
           )}
