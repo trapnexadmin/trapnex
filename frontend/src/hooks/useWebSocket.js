@@ -110,6 +110,18 @@ export function useWebSocket() {
     }
   }, []);
 
+  const updateActiveTrade = useCallback((trade) => {
+    setData((prev) => {
+      const nextData = {
+        ...prev,
+        activeTrade: trade,
+      };
+
+      saveToCache(nextData);
+      return nextData;
+    });
+  }, [saveToCache]);
+
   const connect = useCallback(() => {
     if (!shouldReconnectRef.current) return;
 
@@ -130,7 +142,14 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       setConnected(true);
-      console.log("[WS] Connected");
+      console.log("[WS] Connected, requesting fresh state...");
+      
+      // Request full state refresh on reconnection
+      ws.send(
+        JSON.stringify({
+          type: "REQUEST_STATE",
+        })
+      );
     };
 
     ws.onmessage = (event) => {
@@ -146,7 +165,7 @@ export function useWebSocket() {
                 ...prev,
                 candles: msg.data.candles || prev.candles,
                 analysis: msg.data.analysis,
-                activeTrade: msg.data.activeTrade ?? prev.activeTrade,
+                activeTrade: msg.data.activeTrade ?? null,
                 stats: msg.data.stats,
                 price:
                   msg.data.candles?.["1m"]?.slice(-1)[0]?.close || prev.price,
@@ -159,7 +178,7 @@ export function useWebSocket() {
                 price: msg.data.price,
                 volume: msg.data.volume,
                 candles: msg.data.candles || prev.candles,
-                activeTrade: msg.data.activeTrade || prev.activeTrade,
+                activeTrade: msg.data.activeTrade ?? null,
                 closingSeconds: msg.data.closingSeconds || 0,
                 candleCloseTime: msg.data.candleCloseTime || null,
               };
@@ -215,7 +234,44 @@ export function useWebSocket() {
       setConnected(false);
 
       if (shouldReconnectRef.current) {
-        console.log("[WS] Disconnected, reconnecting...");
+        console.log("[WS] Disconnected, attempting to recover trade state...");
+        
+        // Try to fetch current trade state from API
+        fetch(`${API_URL}/trade`)
+          .then((res) => res.json())
+          .then((trade) => {
+            if (trade && !trade.message) {
+              setData((prev) => ({
+                ...prev,
+                activeTrade: trade,
+                tradeEvent: null, // Clear stale trade events
+              }));
+              console.log("[WS] Recovered active trade from API");
+            }
+          })
+          .catch((err) => {
+            console.log("[WS] Could not recover trade state:", err.message);
+          });
+        
+        // Also try to fetch full cached state
+        fetch(`${API_URL}/state/cached`)
+          .then((res) => res.json())
+          .then((cachedState) => {
+            if (cachedState && (cachedState.candles || cachedState.analysis)) {
+              setData((prev) => ({
+                ...prev,
+                candles: cachedState.candles || prev.candles,
+                analysis: cachedState.analysis || prev.analysis,
+                stats: cachedState.stats || prev.stats,
+              }));
+              console.log("[WS] Recovered full state from cache");
+            }
+          })
+          .catch((err) => {
+            console.log("[WS] Could not fetch cached state:", err.message);
+          });
+
+        // Reconnect after delay
         reconnectRef.current = setTimeout(connect, 3000);
       }
     };
@@ -250,5 +306,5 @@ export function useWebSocket() {
     };
   }, [connect]);
 
-  return { connected, ...data };
+  return { connected, ws: wsRef.current, updateActiveTrade, ...data };
 }

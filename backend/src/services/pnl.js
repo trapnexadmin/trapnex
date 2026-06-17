@@ -18,6 +18,55 @@ class PnLTracker {
     this.tradeHistory = [];
   }
 
+  hydrateActiveTrade(trade) {
+    if (!trade) return null;
+
+    const entryPrice = trade.entry?.price ?? trade.entry ?? 0;
+    const targets = trade.targets || (trade.target ? [trade.target] : []);
+    const targetsHit = Array.isArray(trade.targetsHit) ? trade.targetsHit : [];
+
+    this.activeTrade = {
+      id: trade.id || trade._id?.toString?.() || trade._id || Date.now().toString(36),
+      _dbId: trade._id?.toString?.() || trade._id || trade.id || null,
+      type: trade.type,
+      entry: entryPrice,
+      stopLoss: trade.stopLoss ?? trade.initialSL ?? 0,
+      initialSL: trade.initialSL ?? trade.stopLoss ?? 0,
+      target: trade.target ?? targets[targets.length - 1] ?? null,
+      t1: trade.t1 ?? targets[0] ?? trade.target ?? null,
+      targets,
+      targetPoints: trade.targetPoints || [],
+      score: trade.score ?? 0,
+      grade: trade.grade ?? null,
+      source: trade.source || trade.metadata?.source || null,
+      level: trade.level || null,
+      levelPrice: trade.levelPrice ?? null,
+      openTime:
+        trade.openTime ||
+        (trade.entry?.time ? new Date(trade.entry.time).getTime() : null) ||
+        (trade.createdAt ? new Date(trade.createdAt).getTime() : Date.now()),
+      currentPrice: trade.currentPrice ?? entryPrice,
+      pnl: trade.pnl?.points ?? trade.pnl ?? 0,
+      pnlPercent: trade.pnlPercent ?? trade.pnl?.percentage ?? 0,
+      status: trade.status || "OPEN",
+      targetsHit,
+      currentTargetIdx:
+        typeof trade.currentTargetIdx === "number"
+          ? trade.currentTargetIdx
+          : targetsHit.length,
+      positionSize:
+        typeof trade.positionSize === "number"
+          ? trade.positionSize
+          : Math.max(0, 100 - targetsHit.length * 20),
+      trailActive: Boolean(trade.trailActive || trade.stopLoss !== trade.initialSL),
+      signalId: trade.signalId || null,
+      createdAt: trade.createdAt || null,
+      updatedAt: trade.updatedAt || null,
+    };
+
+    return this.activeTrade;
+  }
+
   openTrade({
     type,
     entry,
@@ -45,6 +94,7 @@ class PnLTracker {
       entry,
       stopLoss,
       initialSL: stopLoss, // store original SL
+      manualSL: false,
       target: target || allTargets[allTargets.length - 1],
       t1: firstTarget,
       targets: allTargets, // array of all targets
@@ -65,6 +115,21 @@ class PnLTracker {
       positionSize: 100, // 100% of position remaining
       trailActive: false,
     };
+
+    return this.activeTrade;
+  }
+
+  adjustStopLoss(newStopLoss) {
+    if (!this.activeTrade) return null;
+
+    const parsedStopLoss = Number(newStopLoss);
+    if (!Number.isFinite(parsedStopLoss) || parsedStopLoss <= 0) {
+      return null;
+    }
+
+    this.activeTrade.stopLoss = round(parsedStopLoss);
+    this.activeTrade.manualSL = true;
+    this.activeTrade.trailActive = false;
 
     return this.activeTrade;
   }
@@ -143,15 +208,27 @@ class PnLTracker {
   }
 
   _updateTrailingSL(trade, targetIdx) {
-    // After T1 (idx=0): structure trades trail just beyond the broken level
-    // First lock for B+, A, A+ trades is entry +10.
+    // After T1 (idx=0): trail SL just below S/R level (support for CALL, resistance for PUT)
+    // For B+, A, A+ grades: use levelPrice with buffer
     // After T2 (idx=1): SL = T1
     // After T3+: SL = previous target
     if (targetIdx === 0) {
-      const lockPrice =
-        trade.type === "CALL"
+      let lockPrice;
+      
+      // Use S/R level if available, otherwise fallback to entry +10
+      if (trade.levelPrice) {
+        // For CALL: place SL slightly below support level
+        // For PUT: place SL slightly above resistance level
+        const buffer = 2; // 2-point buffer from S/R level
+        lockPrice = trade.type === "CALL"
+          ? round(trade.levelPrice - buffer)
+          : round(trade.levelPrice + buffer);
+      } else {
+        // Fallback: entry +10 buffer
+        lockPrice = trade.type === "CALL"
           ? round(trade.entry + 10)
           : round(trade.entry - 10);
+      }
 
       trade.stopLoss = lockPrice;
       trade.trailActive = true;

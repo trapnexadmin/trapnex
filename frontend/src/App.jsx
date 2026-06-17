@@ -76,19 +76,65 @@ export default function App() {
     }
   }, [fetchJournal]);
 
+  const handleAdjustStopLoss = useCallback(
+    async (stopLoss) => {
+      try {
+        const res = await fetch("/api/trade/stop-loss", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ stopLoss }),
+        });
+
+        const payload = await res.json();
+
+        if (!res.ok) {
+          throw new Error(payload?.error || "Failed to update stop loss");
+        }
+
+        if (payload?.trade && ws.updateActiveTrade) {
+          ws.updateActiveTrade(payload.trade);
+        }
+      } catch (err) {
+        console.error("[App] Failed to update stop loss:", err);
+        window.alert("Unable to update stop loss right now. Please try again.");
+        throw err;
+      }
+    },
+    [ws],
+  );
+
   useEffect(() => {
     fetchJournal();
-    const iv = setInterval(fetchJournal, 10000);
+    // Fetch journal more frequently (every 5 seconds) to keep it in sync
+    const iv = setInterval(fetchJournal, 5000);
     return () => clearInterval(iv);
   }, [fetchJournal]);
+
+  // Refetch journal when connection is restored
+  useEffect(() => {
+    if (ws.connected) {
+      console.log("[App] Connection restored, refreshing journal...");
+      fetchJournal();
+    }
+  }, [ws.connected, fetchJournal]);
 
   // Sound notifications for signals
   useEffect(() => {
     const currentSignal = ws.signal || ws.analysis?.signal;
-    if (currentSignal && currentSignal !== lastSignalRef.current) {
+    if (!currentSignal) return;
+
+    // Compare signal by grade and type, not object reference
+    const signalKey = `${currentSignal.type}_${currentSignal.grade}`;
+    const lastSignalKey = lastSignalRef.current
+      ? `${lastSignalRef.current.type}_${lastSignalRef.current.grade}`
+      : null;
+
+    if (signalKey && signalKey !== lastSignalKey) {
       soundManager.playSignal();
       lastSignalRef.current = currentSignal;
-      console.log("[Sound] 🔔 New signal alert");
+      console.log("[Sound] 🔔 New signal alert:", signalKey);
     }
   }, [ws.signal, ws.analysis?.signal]);
 
@@ -120,6 +166,12 @@ export default function App() {
         } else {
           soundManager.playStopLoss();
         }
+      } else if (reason === "MANUAL") {
+        if (pnl >= 0) {
+          soundManager.playTarget();
+        } else {
+          soundManager.playStopLoss();
+        }
       }
 
       fetchJournal();
@@ -135,7 +187,7 @@ export default function App() {
           onPnLClick={() => setShowPnLAnalysis(true)}
           onSymbolChange={handleSymbolChange}
         />
-        <MarketStatusBanner />
+        <MarketStatusBanner connected={ws.connected} />
 
         <main className="max-w-[1920px] mx-auto px-4 pb-6 pt-2">
           {/* Top Row: Chart + Signal */}
@@ -180,6 +232,7 @@ export default function App() {
               <PnLCard
                 trade={ws.activeTrade}
                 onExitAllPositions={handleExitAllPositions}
+                onAdjustStopLoss={handleAdjustStopLoss}
               />
             </div>
           </div>

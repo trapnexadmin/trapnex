@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { isMarketOpen, getMarketStatusMessage } from '../utils/marketHours';
 
-export default function MarketStatusBanner() {
+export default function MarketStatusBanner({ connected = true }) {
   const [marketStatus, setMarketStatus] = useState(getMarketStatusMessage());
 
   useEffect(() => {
@@ -13,7 +13,26 @@ export default function MarketStatusBanner() {
     return () => clearInterval(interval);
   }, []);
 
-  // Don't show banner if market is open
+  // Show disconnection banner if WebSocket is disconnected
+  if (!connected) {
+    return (
+      <div className="bg-brand-yellow/20 border-b border-brand-yellow/30 px-4 py-3">
+        <div className="flex items-center justify-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-brand-yellow animate-pulse" />
+            <span className="text-brand-yellow font-semibold text-sm">
+              BACKEND DISCONNECTED
+            </span>
+          </div>
+          <span className="text-brand-muted text-sm">
+            Showing cached data. Attempting to reconnect...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't show market status banner if market is open
   if (marketStatus.status === 'OPEN') {
     return null;
   }

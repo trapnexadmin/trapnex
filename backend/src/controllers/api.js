@@ -80,10 +80,19 @@ function normalizeStats(stats, trades = []) {
   };
 }
 
+function normalizeStateSnapshot(state) {
+  if (!state) return state;
+
+  return {
+    ...state,
+    activeTrade: normalizeTrade(state.activeTrade),
+  };
+}
+
 function createControllers(strategyRunner, journal) {
   // Get current state (candles, analysis, trade)
   router.get('/state', (req, res) => {
-    res.json(strategyRunner.getState());
+    res.json(normalizeStateSnapshot(strategyRunner.getState()));
   });
   
   // Get cached state (for offline viewing)
@@ -91,10 +100,18 @@ function createControllers(strategyRunner, journal) {
     try {
       const cachedState = await dbService.getCachedState();
       if (cachedState) {
-        res.json({ cached: true, ...cachedState });
+        res.json({ cached: true, ...normalizeStateSnapshot(cachedState) });
       } else {
         // Fallback to current state
-        res.json({ cached: false, ...strategyRunner.getState() });
+        const liveState = normalizeStateSnapshot(strategyRunner.getState());
+        if (!liveState.activeTrade) {
+          const dbOpenTrade = await dbService.getLatestOpenTrade();
+          if (dbOpenTrade) {
+            liveState.activeTrade = normalizeTrade(dbOpenTrade);
+          }
+        }
+
+        res.json({ cached: false, ...liveState });
       }
     } catch (err) {
       res.status(500).json({ error: 'Failed to load cached state' });
@@ -118,9 +135,60 @@ function createControllers(strategyRunner, journal) {
   });
 
   // Get active trade
-  router.get('/trade', (req, res) => {
-    const trade = strategyRunner.pnlTracker.getActiveTrade();
-    res.json(trade || { message: 'No active trade' });
+  router.get('/trade', async (req, res) => {
+    const liveTrade = strategyRunner.pnlTracker.getActiveTrade();
+    if (liveTrade) {
+      return res.json(normalizeTrade(liveTrade));
+    }
+
+    const dbOpenTrade = await dbService.getLatestOpenTrade();
+    if (dbOpenTrade) {
+      return res.json(normalizeTrade(dbOpenTrade));
+    }
+
+    res.json({ message: 'No active trade' });
+  });
+
+  // Adjust active trade stop loss manually
+  router.post('/trade/stop-loss', async (req, res) => {
+    const requestedStopLoss = Number(req.body?.stopLoss);
+
+    if (!Number.isFinite(requestedStopLoss) || requestedStopLoss <= 0) {
+      return res.status(400).json({ error: 'Valid stopLoss required' });
+    }
+
+    let activeTrade = strategyRunner.pnlTracker.getActiveTrade();
+    if (!activeTrade) {
+      const dbOpenTrade = await dbService.getLatestOpenTrade();
+      if (!dbOpenTrade) {
+        return res.status(400).json({ error: 'No active trade to update' });
+      }
+
+      activeTrade = strategyRunner.pnlTracker.hydrateActiveTrade(dbOpenTrade);
+    }
+
+    const updatedTrade = strategyRunner.pnlTracker.adjustStopLoss(requestedStopLoss);
+    if (!updatedTrade) {
+      return res.status(400).json({ error: 'Failed to update stop loss' });
+    }
+
+    const tradeId = updatedTrade._dbId || updatedTrade.id;
+    if (tradeId) {
+      await dbService.updateTrade(tradeId, {
+        stopLoss: updatedTrade.stopLoss,
+        initialSL: updatedTrade.initialSL,
+        metadata: {
+          ...(updatedTrade.metadata || {}),
+          manualSL: true,
+          manualSLUpdatedAt: new Date(),
+        },
+      });
+    }
+
+    return res.json({
+      message: 'Stop loss updated',
+      trade: normalizeTrade(updatedTrade),
+    });
   });
 
   // Close active trade manually

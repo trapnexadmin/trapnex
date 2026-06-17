@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
-export default function PnLCard({ trade, onExitAllPositions }) {
+export default function PnLCard({ trade, onExitAllPositions, onAdjustStopLoss }) {
   const [isExiting, setIsExiting] = useState(false);
+  const [manualStopLoss, setManualStopLoss] = useState("");
+  const [isAdjustingSL, setIsAdjustingSL] = useState(false);
+
+  useEffect(() => {
+    setManualStopLoss(trade?.stopLoss?.toString?.() || "");
+  }, [trade?.stopLoss]);
 
   if (!trade) {
     return (
@@ -30,6 +36,23 @@ export default function PnLCard({ trade, onExitAllPositions }) {
       await onExitAllPositions();
     } finally {
       setIsExiting(false);
+    }
+  };
+
+  const handleAdjustSL = async () => {
+    if (!onAdjustStopLoss || isAdjustingSL) return;
+
+    const nextStopLoss = Number(manualStopLoss);
+    if (!Number.isFinite(nextStopLoss) || nextStopLoss <= 0) {
+      window.alert("Enter a valid stop loss value.");
+      return;
+    }
+
+    setIsAdjustingSL(true);
+    try {
+      await onAdjustStopLoss(nextStopLoss);
+    } finally {
+      setIsAdjustingSL(false);
     }
   };
 
@@ -113,6 +136,35 @@ export default function PnLCard({ trade, onExitAllPositions }) {
           </span>
         </div>
       </div>
+
+      {onAdjustStopLoss && (
+        <div className="mb-3 rounded-lg border border-brand-border bg-white/5 p-3">
+          <div className="mb-2 text-[10px] uppercase tracking-wider text-brand-muted">
+            Manual SL
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.05"
+              value={manualStopLoss}
+              onChange={(event) => setManualStopLoss(event.target.value)}
+              className="w-full rounded-md border border-brand-border bg-brand-bg/70 px-3 py-2 text-sm font-mono text-brand-text outline-none transition-colors focus:border-brand-blue"
+              placeholder="Set stop loss"
+            />
+            <button
+              type="button"
+              onClick={handleAdjustSL}
+              disabled={isAdjustingSL}
+              className="rounded-md border border-brand-blue/30 bg-brand-blue/10 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-brand-blue transition-colors hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isAdjustingSL ? "Saving..." : "Apply"}
+            </button>
+          </div>
+          <div className="mt-2 text-[10px] text-brand-muted">
+            Updates the live trade SL immediately and saves it to MongoDB.
+          </div>
+        </div>
+      )}
 
       {onExitAllPositions && (
         <button

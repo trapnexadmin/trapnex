@@ -53,7 +53,11 @@ wss.on("connection", (ws) => {
     try {
       const data = JSON.parse(message);
 
-      if (data.type === "CHANGE_SYMBOL") {
+      if (data.type === "REQUEST_STATE") {
+        // Send full state when client requests (e.g., after reconnection)
+        console.log("[WS] Client requested state refresh");
+        ws.send(JSON.stringify({ type: "INIT", data: strategyRunner.getState() }));
+      } else if (data.type === "CHANGE_SYMBOL") {
         console.log(`[WS] Symbol change request:`, data.data);
 
         // Get instrument token for the selected symbol
@@ -121,6 +125,19 @@ function normalizeTradeEventTrade(trade) {
     entryTime: trade.openTime ?? trade.timestamp ?? null,
     pnlPercent: trade.pnlPercent ?? 0,
   };
+}
+
+async function hydrateActiveTradeFromDatabase() {
+  const openTrade = await dbService.getLatestOpenTrade();
+
+  if (openTrade) {
+    const hydratedTrade = pnlTracker.hydrateActiveTrade(openTrade);
+    console.log(
+      `[Startup] Restored open trade from MongoDB: ${hydratedTrade.type} @ ${hydratedTrade.entry}`,
+    );
+  } else {
+    console.log("[Startup] No open trade found in MongoDB");
+  }
 }
 
 // ---- Demo Mode (simulated data when no Upstox token) ----
@@ -392,6 +409,7 @@ async function startLiveMode() {
 server.listen(PORT, async () => {
   // Connect to MongoDB
   await connectDB();
+  await hydrateActiveTradeFromDatabase();
 
   const selectedPlatform = process.env.MARKET_PLATFORM || "angelone";
   const hasCredentials = FeedFactory.hasCredentials(selectedPlatform);
