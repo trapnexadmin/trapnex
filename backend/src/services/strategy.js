@@ -771,10 +771,13 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           rejectionCandle,
           holdConfirmed.direction,
         );
+        const strongRejectionConfirmed = hasStrongRejectionConfirmation(
+          rejectionCandle,
+        );
 
-        if (rejectionAligned) {
+        if (rejectionAligned && (scoring.score >= 12 || strongRejectionConfirmed)) {
           console.log(
-            `[Strategy] ✅ RETEST_CONFIRMED: ${type} @ ${holdConfirmed.level} | Score: ${scoring.score} | ${scoring.grade}`,
+            `[Strategy] ✅ RETEST_CONFIRMED: ${type} @ ${holdConfirmed.level} | Score: ${scoring.score} | ${scoring.grade}${strongRejectionConfirmed && scoring.score < 12 ? " | Strong rejection override" : ""}`,
           );
           signals.push(
             buildV3Signal(
@@ -811,10 +814,13 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           rejectionCandle,
           retestDetected.direction,
         );
+        const strongRejectionConfirmed = hasStrongRejectionConfirmation(
+          rejectionCandle,
+        );
 
-        if (rejectionAligned) {
+        if (rejectionAligned && (scoring.score >= 12 || strongRejectionConfirmed)) {
           console.log(
-            `[Strategy] ✅ RETEST_PENDING: ${type} @ ${retestDetected.level} | Score: ${scoring.score} | ${scoring.grade}`,
+            `[Strategy] ✅ RETEST_PENDING: ${type} @ ${retestDetected.level} | Score: ${scoring.score} | ${scoring.grade}${strongRejectionConfirmed && scoring.score < 12 ? " | Strong rejection override" : ""}`,
           );
           const sig = buildV3Signal(
             type,
@@ -1446,8 +1452,7 @@ function detectRangeRejectionSetup(
   if (
     !candles ||
     candles.length < 8 ||
-    !levelInteraction ||
-    !strongCandle?.isStrong
+    !levelInteraction
   ) {
     return null;
   }
@@ -1776,6 +1781,14 @@ function validateRejectionAlignment(rejectionCandle, expectedDirection) {
   }
 
   return true; // No rejection detected, allow signal
+}
+
+function hasStrongRejectionConfirmation(rejectionCandle) {
+  return Boolean(
+    rejectionCandle?.detected &&
+      rejectionCandle?.strength >= 1.25 &&
+      (rejectionCandle?.wick === "LOWER" || rejectionCandle?.wick === "UPPER"),
+  );
 }
 
 /**

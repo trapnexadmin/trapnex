@@ -165,6 +165,7 @@ export function useWebSocket() {
                 ...prev,
                 candles: msg.data.candles || prev.candles,
                 analysis: msg.data.analysis,
+                signal: msg.data.analysis?.signal ?? null,
                 activeTrade: msg.data.activeTrade ?? null,
                 stats: msg.data.stats,
                 price:
@@ -202,7 +203,11 @@ export function useWebSocket() {
               break;
 
             case "ANALYSIS":
-              newData = { ...prev, analysis: msg.data };
+              newData = {
+                ...prev,
+                analysis: msg.data,
+                signal: msg.data?.signal ?? null,
+              };
               break;
 
             case "SIGNAL":
