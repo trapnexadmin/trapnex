@@ -43,12 +43,15 @@ const { getCPRState, LevelRetestTracker } = require("./marketStructure");
 
 // Global market structure tracker (maintains state across ticks)
 const retestTracker = new LevelRetestTracker();
-const EXPLOSIVE_BREAKOUT_THRESHOLD = 70;
+const MIN_TRADE_SCORE = 10;
+const EXPLOSIVE_BREAKOUT_THRESHOLD = 80;
 const RANGE_REJECTION_SCORE_BOOST = 3.5;
 const MIN_RANGE_REJECTIONS = 2;
 const TRIANGLE_LOOKBACK_CANDLES = 8;
 const TRIANGLE_TOLERANCE_POINTS = 3;
 const TRIANGLE_BREAKOUT_BUFFER = 10;
+const ROUND_NUMBER_STEP = 500;
+const ROUND_NUMBER_TOLERANCE = 20;
 
 function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   if (!previousDayHLC) return null;
@@ -277,6 +280,9 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   // 3. Enhanced Rejection Candle Detection
   const rejectionCandle = detectRejectionCandle(lastCandle);
 
+  // 3B. Round-number wick rejection detection
+  const roundRejectionSetup = detectRoundNumberRejection(candles3m);
+
   // 4. Enhanced Strong Candle Detection
   const strongCandle = isStrongCandle(lastCandle, candles3m);
 
@@ -314,6 +320,18 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     atr,
     strongCandle,
   );
+  const breakoutMomentumSetup = detectBreakoutMomentumSetup(
+    candles3m,
+    breakoutDetected,
+    atr,
+    strongCandle,
+  );
+  const cprRangeRejectionSetup = detectCPRRangeRejectionSetup(
+    candles3m,
+    cpr,
+    atr,
+    strongCandle,
+  );
   const compressionZone = detectCompressionZone(
     candles3m,
     supportResistance,
@@ -325,6 +343,12 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     candles3m,
     compressionZone,
     atr,
+  );
+  const triangleContinuationSetup = detectTriangleContinuationSetup(
+    candles3m,
+    compressionZone,
+    atr,
+    strongCandle,
   );
 
   // === MULTI-TIMEFRAME CONFIRMATION ===
@@ -387,47 +411,31 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   const nearestSupport = levelInteraction?.nearestSupport || "S1";
 
   // === V3 FIXED-POINT TARGETS + STRUCTURE SL ===
-  // Grade-based fixed targets (NIFTY options points)
-  // A+: T1=25, T2=50, T3=75, T4=100, T5=120
-  // A:  T1=22, T2=44, T3=66, T4=88
-  // B+: T1=20, T2=40, T3=60
+  // Grade-based target steps. Option premium enrichment converts these to
+  // premium targets, e.g. 120 -> 132/144/156/168.
   // Thursday (expiry): Max T2 only
   function getTargetsForGrade(grade, profile = "default") {
     const now = new Date();
     const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-    const isThursday = istDate.getUTCDay() === 4; // Thursday = expiry day
-    const isLowCprWidth = cpr.width < 16;
+    const isTuesday = istDate.getUTCDay() === 2; // Tuesday = expiry day
 
-    if (isLowCprWidth && profile !== "compact") {
-      if (grade === "A+") {
-        return isThursday
-          ? [10, 20]
-          : [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-      }
-
-      if (grade === "A" || grade === "B+") {
-        return isThursday ? [8, 16] : [8, 16, 24, 32, 40, 48, 56, 64];
-      }
+    if (profile === "micro") {
+      return isTuesday ? [6, 12] : [6, 12, 18];
     }
 
-    let targets;
     if (profile === "compact") {
-      if (grade === "A+") {
-        targets = isThursday ? [20, 40] : [20, 40, 60];
-      } else if (grade === "A") {
-        targets = isThursday ? [18, 36] : [18, 36, 54];
-      } else {
-        targets = isThursday ? [15, 30] : [15, 30, 45];
-      }
-    } else if (grade === "A+") {
-      targets = isThursday ? [25, 50] : [25, 50, 75, 100, 120];
-    } else if (grade === "A") {
-      targets = isThursday ? [22, 44] : [22, 44, 66, 88];
-    } else {
-      // B+
-      targets = isThursday ? [20, 40] : [20, 40, 60];
+      return isTuesday ? [12, 24] : [12, 24, 36];
     }
-    return targets;
+
+    if (grade === "A+") {
+      return isTuesday ? [12, 24] : [12, 24, 36, 48, 60];
+    }
+
+    if (grade === "A") {
+      return isTuesday ? [12, 24] : [12, 24, 36, 48];
+    }
+
+    return isTuesday ? [12, 24] : [12, 24, 36];
   }
 
   // Structure SL: use retest level + buffer; floor with fixed SL per grade
@@ -453,6 +461,99 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     } else {
       return Math.max(structureSL, fixedSL); // higher of the two = wider SL for put
     }
+  }
+
+  function detectRoundNumberRejection(candles) {
+    if (!candles || candles.length < 1) return null;
+
+    const recent = candles.slice(-3).reverse();
+
+    for (const candle of recent) {
+      const body = Math.abs(candle.close - candle.open);
+      const range = Math.max(candle.high - candle.low, 0.01);
+      const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+      const upperWick = candle.high - Math.max(candle.open, candle.close);
+      const roundLevel = Math.round(candle.close / ROUND_NUMBER_STEP) * ROUND_NUMBER_STEP;
+      const touchedRoundLevel =
+        Math.abs(candle.high - roundLevel) <= ROUND_NUMBER_TOLERANCE ||
+        Math.abs(candle.low - roundLevel) <= ROUND_NUMBER_TOLERANCE ||
+        Math.abs(candle.close - roundLevel) <= ROUND_NUMBER_TOLERANCE;
+
+      if (!touchedRoundLevel) continue;
+
+      const bearishRejection =
+        candle.high >= roundLevel - ROUND_NUMBER_TOLERANCE &&
+        candle.high <= roundLevel + ROUND_NUMBER_TOLERANCE &&
+        candle.close < roundLevel &&
+        upperWick > body;
+
+      if (bearishRejection) {
+        return {
+          detected: true,
+          direction: "BEARISH",
+          type: "ROUND_NUMBER_REJECTION",
+          level: roundLevel,
+          price: roundLevel,
+          wick: "UPPER",
+          strength: round((upperWick / Math.max(body, 0.01)) * (body / range)),
+          candleTime: candle.time || null,
+          description: `Upper wick rejection near round level ${roundLevel}`,
+        };
+      }
+
+      const bullishRejection =
+        candle.low >= roundLevel - ROUND_NUMBER_TOLERANCE &&
+        candle.low <= roundLevel + ROUND_NUMBER_TOLERANCE &&
+        candle.close > roundLevel &&
+        lowerWick > body;
+
+      if (bullishRejection) {
+        return {
+          detected: true,
+          direction: "BULLISH",
+          type: "ROUND_NUMBER_REJECTION",
+          level: roundLevel,
+          price: roundLevel,
+          wick: "LOWER",
+          strength: round((lowerWick / Math.max(body, 0.01)) * (body / range)),
+          candleTime: candle.time || null,
+          description: `Lower wick rejection near round level ${roundLevel}`,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function elevateScoringForRoundRejectionSetup(scoringResult, setup) {
+    const boostedScore = Math.max(
+      MIN_TRADE_SCORE,
+      round((scoringResult?.score || 0) + 3),
+    );
+    let grade = "B+";
+
+    if (boostedScore >= 16) {
+      grade = "A+";
+    } else if (boostedScore >= 13) {
+      grade = "A";
+    }
+
+    return {
+      ...scoringResult,
+      score: boostedScore,
+      grade,
+      tradeable: true,
+      autoExecute: false,
+      breakdown: [
+        ...(Array.isArray(scoringResult?.breakdown) ? scoringResult.breakdown : []),
+        {
+          factor: `Round Level ${setup.level}`,
+          points: 3,
+          critical: true,
+          description: setup.description,
+        },
+      ],
+    };
   }
 
   // Build a V3 signal object
@@ -499,7 +600,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         oppositeDirection: `⚠️ Opposite to structure (-${penalty})`,
       };
 
-      // V3 STRICT: Recalculate grade based on new score (min 12 for B+)
+      // V3 STRICT: Recalculate grade based on new score (min 10 for B+)
       if (adjustedScoring.score >= 16) {
         adjustedScoring.grade = "A+";
         adjustedScoring.tradeable = true;
@@ -508,7 +609,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         adjustedScoring.grade = "A";
         adjustedScoring.tradeable = true;
         adjustedScoring.autoExecute = false;
-      } else if (adjustedScoring.score >= 12) {
+      } else if (adjustedScoring.score >= MIN_TRADE_SCORE) {
         adjustedScoring.grade = "B+";
         adjustedScoring.tradeable = true;
         adjustedScoring.autoExecute = false;
@@ -610,7 +711,10 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     scoringResult,
     explosiveBreakout,
   ) {
-    const boostedScore = Math.max(12, (scoringResult?.score || 0) + 3);
+    const boostedScore = Math.max(
+      MIN_TRADE_SCORE,
+      (scoringResult?.score || 0) + 3,
+    );
     let grade = "B+";
     let autoExecute = false;
 
@@ -643,7 +747,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
 
   function elevateScoringForRangeRejectionSetup(scoringResult, setup) {
     const boostedScore = Math.max(
-      12,
+      MIN_TRADE_SCORE,
       round((scoringResult?.score || 0) + RANGE_REJECTION_SCORE_BOOST),
     );
     let grade = "B+";
@@ -677,7 +781,10 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
   }
 
   function elevateScoringForQuickReversalSetup(scoringResult, setup) {
-    const boostedScore = Math.max(12, round((scoringResult?.score || 0) + 4.5));
+    const boostedScore = Math.max(
+      MIN_TRADE_SCORE,
+      round((scoringResult?.score || 0) + 4.5),
+    );
     let grade = "B+";
     let autoExecute = false;
 
@@ -724,7 +831,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     !continuationDetected &&
     !explosiveBreakoutDetected &&
     !rangeRejectionSetup &&
-    !quickReversalSetup;
+    !quickReversalSetup &&
+    !roundRejectionSetup;
 
   if (isInsideCPR && !isWideCPR) {
     console.log(
@@ -743,10 +851,14 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       retestDetected ||
       holdConfirmed ||
       continuationDetected ||
+      breakoutMomentumSetup ||
       explosiveBreakoutDetected ||
       rangeRejectionSetup ||
+      cprRangeRejectionSetup ||
       quickReversalSetup ||
-      triangleRetestSetup;
+      roundRejectionSetup ||
+      triangleRetestSetup ||
+      triangleContinuationSetup;
 
     if (!hasProperStructure) {
       console.log(
@@ -760,8 +872,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         );
       }
 
-      // Setup 1: Hold Confirmed (Highest Confidence) - STRICT: Score >= 12
-      if (holdConfirmed && scoring.score >= 12 && mtfConfirmed) {
+      // Setup 1: Hold Confirmed (Highest Confidence) - STRICT: Score >= 10
+      if (holdConfirmed && scoring.score >= MIN_TRADE_SCORE && mtfConfirmed) {
         const type = holdConfirmed.direction === "BULLISH" ? "CALL" : "PUT";
         const entry = lastPrice;
         const levelPrice = holdConfirmed.price;
@@ -771,13 +883,15 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           rejectionCandle,
           holdConfirmed.direction,
         );
-        const strongRejectionConfirmed = hasStrongRejectionConfirmation(
-          rejectionCandle,
-        );
+        const strongRejectionConfirmed =
+          hasStrongRejectionConfirmation(rejectionCandle);
 
-        if (rejectionAligned && (scoring.score >= 12 || strongRejectionConfirmed)) {
+        if (
+          rejectionAligned &&
+          (scoring.score >= MIN_TRADE_SCORE || strongRejectionConfirmed)
+        ) {
           console.log(
-            `[Strategy] ✅ RETEST_CONFIRMED: ${type} @ ${holdConfirmed.level} | Score: ${scoring.score} | ${scoring.grade}${strongRejectionConfirmed && scoring.score < 12 ? " | Strong rejection override" : ""}`,
+            `[Strategy] ✅ RETEST_CONFIRMED: ${type} @ ${holdConfirmed.level} | Score: ${scoring.score} | ${scoring.grade}${strongRejectionConfirmed && scoring.score < MIN_TRADE_SCORE ? " | Strong rejection override" : ""}`,
           );
           signals.push(
             buildV3Signal(
@@ -798,11 +912,11 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         }
       }
 
-      // Setup 2: Retest detected (STRICT: Score >= 12 for B+)
+      // Setup 2: Retest detected (STRICT: Score >= 10 for B+)
       if (
         retestDetected &&
         !holdConfirmed &&
-        scoring.score >= 12 &&
+        scoring.score >= MIN_TRADE_SCORE &&
         mtfConfirmed
       ) {
         const type = retestDetected.direction === "BULLISH" ? "CALL" : "PUT";
@@ -814,13 +928,15 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           rejectionCandle,
           retestDetected.direction,
         );
-        const strongRejectionConfirmed = hasStrongRejectionConfirmation(
-          rejectionCandle,
-        );
+        const strongRejectionConfirmed =
+          hasStrongRejectionConfirmation(rejectionCandle);
 
-        if (rejectionAligned && (scoring.score >= 12 || strongRejectionConfirmed)) {
+        if (
+          rejectionAligned &&
+          (scoring.score >= MIN_TRADE_SCORE || strongRejectionConfirmed)
+        ) {
           console.log(
-            `[Strategy] ✅ RETEST_PENDING: ${type} @ ${retestDetected.level} | Score: ${scoring.score} | ${scoring.grade}${strongRejectionConfirmed && scoring.score < 12 ? " | Strong rejection override" : ""}`,
+            `[Strategy] ✅ RETEST_PENDING: ${type} @ ${retestDetected.level} | Score: ${scoring.score} | ${scoring.grade}${strongRejectionConfirmed && scoring.score < MIN_TRADE_SCORE ? " | Strong rejection override" : ""}`,
           );
           const sig = buildV3Signal(
             type,
@@ -832,7 +948,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
             scoring,
             false,
           );
-          sig.tradeable = scoring.score >= 12; // B+ requires 12+ now
+          sig.tradeable = scoring.score >= MIN_TRADE_SCORE;
           sig.autoExecute = false;
           signals.push(sig);
         } else {
@@ -842,12 +958,12 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         }
       }
 
-      // Setup 2B: Breakout continuation after shallow pullback (STRICT: Score >= 12)
+      // Setup 2B: Breakout continuation after shallow pullback (STRICT: Score >= 10)
       if (
         continuationDetected &&
         !holdConfirmed &&
         !retestDetected &&
-        scoring.score >= 12 &&
+        scoring.score >= MIN_TRADE_SCORE &&
         mtfConfirmed
       ) {
         const type =
@@ -868,6 +984,82 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
           atr,
           scoring,
           false,
+        );
+        sig.autoExecute = false;
+        signals.push(sig);
+      }
+
+      // Setup 2BA: Fresh breakout/breakdown with immediate continuation
+      if (
+        breakoutMomentumSetup &&
+        !holdConfirmed &&
+        !retestDetected &&
+        !continuationDetected &&
+        mtfConfirmed
+      ) {
+        const type =
+          breakoutMomentumSetup.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = breakoutMomentumSetup.price;
+        const momentumScoring = elevateScoringForQuickReversalSetup(
+          scoring,
+          breakoutMomentumSetup,
+        );
+
+        console.log(
+          `[Strategy] ✅ BREAKOUT_MOMENTUM: ${type} @ ${breakoutMomentumSetup.level} | Score: ${momentumScoring.score} | ${momentumScoring.grade}`,
+        );
+
+        const sig = buildV3Signal(
+          type,
+          entry,
+          levelPrice,
+          "BREAKOUT_MOMENTUM",
+          breakoutMomentumSetup.level,
+          atr,
+          momentumScoring,
+          false,
+          { targetProfile: "compact" },
+        );
+        sig.autoExecute = false;
+        signals.push(sig);
+      }
+
+      // Setup 2C: Multiple rejections at CPR ranges: BC/R -> PE, TC/S -> CE
+      if (
+        cprRangeRejectionSetup &&
+        !holdConfirmed &&
+        !retestDetected &&
+        mtfConfirmed
+      ) {
+        const type =
+          cprRangeRejectionSetup.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = cprRangeRejectionSetup.price;
+        const cprRangeScoring = elevateScoringForRangeRejectionSetup(
+          scoring,
+          cprRangeRejectionSetup,
+        );
+
+        console.log(
+          `[Strategy] ✅ CPR_RANGE_REJECTION: ${type} @ ${cprRangeRejectionSetup.level} | Rejections: ${cprRangeRejectionSetup.rejectionCount} | Score: ${cprRangeScoring.score} | ${cprRangeScoring.grade}`,
+        );
+
+        const sig = buildV3Signal(
+          type,
+          entry,
+          levelPrice,
+          "CPR_RANGE_REJECTION",
+          cprRangeRejectionSetup.level,
+          atr,
+          cprRangeScoring,
+          false,
+          {
+            targetProfile: "compact",
+            levelType: "CPR",
+            levelLabel: cprRangeRejectionSetup.level,
+            levelSide: cprRangeRejectionSetup.levelSide,
+          },
         );
         sig.autoExecute = false;
         signals.push(sig);
@@ -943,7 +1135,50 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         signals.push(sig);
       }
 
-      // Setup 2F: Compression / Triangle breakout retest confirmation
+      // Setup 2F: Triangle breakout continuation without exact retest
+      if (triangleContinuationSetup && !triangleRetestSetup && mtfConfirmed) {
+        const type =
+          triangleContinuationSetup.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = triangleContinuationSetup.price;
+        const triangleScoring = {
+          ...scoring,
+          score: Math.max(MIN_TRADE_SCORE, (scoring.score || 0) + 3),
+          grade: (scoring.score || 0) + 3 >= 13 ? "A" : "B+",
+          tradeable: true,
+          autoExecute: false,
+          breakdown: [
+            ...(Array.isArray(scoring.breakdown) ? scoring.breakdown : []),
+            {
+              factor: compressionZone.patternLabel || "Triangle Continuation",
+              points: 3,
+              critical: true,
+              description: triangleContinuationSetup.description,
+            },
+          ],
+        };
+
+        console.log(
+          `[Strategy] ✅ TRIANGLE_CONTINUATION: ${type} @ ${triangleContinuationSetup.level} | Score: ${triangleScoring.score} | ${triangleScoring.grade}`,
+        );
+
+        const sig = buildV3Signal(
+          type,
+          entry,
+          levelPrice,
+          "TRIANGLE_CONTINUATION",
+          triangleContinuationSetup.level,
+          atr,
+          triangleScoring,
+          false,
+          { targetProfile: "compact", patternType: "COMPRESSION" },
+        );
+        sig.tradeable = true;
+        sig.autoExecute = false;
+        signals.push(sig);
+      }
+
+      // Setup 2G: Compression / Triangle breakout retest confirmation
       if (triangleRetestSetup && mtfConfirmed) {
         const type =
           triangleRetestSetup.direction === "BULLISH" ? "CALL" : "PUT";
@@ -990,7 +1225,52 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         signals.push(sig);
       }
 
-      // Setup 2C: One-candle explosive breakout (50+ pts beyond broken level)
+      // Setup 2BB: Round-number wick rejection (24000/23500 style)
+      if (
+        roundRejectionSetup &&
+        !holdConfirmed &&
+        !retestDetected &&
+        !continuationDetected &&
+        !breakoutMomentumSetup &&
+        mtfConfirmed
+      ) {
+        const type = roundRejectionSetup.direction === "BULLISH" ? "CALL" : "PUT";
+        const entry = lastPrice;
+        const levelPrice = roundRejectionSetup.price;
+        const roundRejectionScoring = elevateScoringForRoundRejectionSetup(
+          scoring,
+          roundRejectionSetup,
+        );
+
+        console.log(
+          `[Strategy] ✅ ROUND_REJECTION: ${type} @ ${roundRejectionSetup.level} | Score: ${roundRejectionScoring.score} | ${roundRejectionScoring.grade} | Small targets`,
+        );
+
+        const sig = buildV3Signal(
+          type,
+          entry,
+          levelPrice,
+          "ROUND_REJECTION",
+          String(roundRejectionSetup.level),
+          atr,
+          roundRejectionScoring,
+          false,
+          {
+            targetProfile: "micro",
+            levelType: "ROUND",
+            levelLabel: `${roundRejectionSetup.level}`,
+            levelSide:
+              roundRejectionSetup.direction === "BULLISH"
+                ? "SUPPORT"
+                : "RESISTANCE",
+          },
+        );
+        sig.tradeable = true;
+        sig.autoExecute = false;
+        signals.push(sig);
+      }
+
+      // Setup 2H: One-candle explosive breakout (80+ pts beyond broken level)
       if (
         explosiveBreakoutDetected &&
         !holdConfirmed &&
@@ -1025,11 +1305,11 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         signals.push(sig);
       }
 
-      // Setup 3: CPR Rejection Reversal (STRICT: Only with proper structure + score >= 12)
+      // Setup 3: CPR Rejection Reversal (STRICT: Only with proper structure + score >= 10)
       if (
         hasProperStructure &&
         cprState?.state === "REJECTION" &&
-        scoring.score >= 12 &&
+        scoring.score >= MIN_TRADE_SCORE &&
         mtfConfirmed
       ) {
         const rejectionBias = cprState?.bias || bias;
@@ -1149,11 +1429,15 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
                   retestDetected ||
                   holdConfirmed ||
                   continuationDetected ||
+                  breakoutMomentumSetup ||
                   explosiveBreakoutDetected ||
-                  rangeRejectionSetup
+                  rangeRejectionSetup ||
+                  cprRangeRejectionSetup ||
+                  triangleRetestSetup ||
+                  triangleContinuationSetup
                 )
               ? "WAITING_STRUCTURE_CONFIRMATION"
-              : scoring.score < 12
+              : scoring.score < MIN_TRADE_SCORE
                 ? "WAITING_SCORE_UPGRADE"
                 : "WAITING_REJECTION_ALIGNMENT",
   };
@@ -1181,6 +1465,7 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
     retestDetected,
     holdConfirmed,
     continuationDetected,
+    roundRejectionSetup,
     rangeRejectionSetup,
     rejectionCandle,
     priceStructure, // V3 FIX: Price structure detection
@@ -1402,7 +1687,12 @@ function detectTriangleRetestSetup(candles, compressionZone, atr) {
 
   const breakoutLevel = compressionZone.breakoutLevel;
   const breakoutBuffer = Math.max(TRIANGLE_BREAKOUT_BUFFER, atr * 0.4, 6);
-  const retestTolerance = Math.max(TRIANGLE_TOLERANCE_POINTS, atr * 0.15, 3);
+  const retestTolerance = Math.max(
+    TRIANGLE_TOLERANCE_POINTS,
+    atr * 0.35,
+    (compressionZone.rangeWidth || 0) * 0.2,
+    6,
+  );
   const lastCandle = recent[recent.length - 1];
   const priorCandles = recent.slice(0, -1);
 
@@ -1442,6 +1732,131 @@ function detectTriangleRetestSetup(candles, compressionZone, atr) {
   return null;
 }
 
+function detectTriangleContinuationSetup(
+  candles,
+  compressionZone,
+  atr,
+  strongCandle,
+) {
+  if (
+    !candles ||
+    candles.length < TRIANGLE_LOOKBACK_CANDLES ||
+    !compressionZone?.detected ||
+    !compressionZone?.direction ||
+    !compressionZone?.breakoutLevel ||
+    !compressionZone?.breakoutConfirmed
+  ) {
+    return null;
+  }
+
+  const recent = candles.slice(-3);
+  if (recent.length < 3) return null;
+
+  const lastCandle = recent[recent.length - 1];
+  const previousCandle = recent[recent.length - 2];
+  const breakoutLevel = compressionZone.breakoutLevel;
+  const followThroughBuffer = Math.max(atr * 0.25, 5);
+
+  const continuingUp =
+    compressionZone.direction === "BULLISH" &&
+    recent.every((candle) => candle.close > breakoutLevel) &&
+    lastCandle.close > previousCandle.high - followThroughBuffer &&
+    (lastCandle.close > lastCandle.open ||
+      strongCandle?.direction === "BULLISH");
+
+  const continuingDown =
+    compressionZone.direction === "BEARISH" &&
+    recent.every((candle) => candle.close < breakoutLevel) &&
+    lastCandle.close < previousCandle.low + followThroughBuffer &&
+    (lastCandle.close < lastCandle.open ||
+      strongCandle?.direction === "BEARISH");
+
+  if (!continuingUp && !continuingDown) return null;
+
+  return {
+    detected: true,
+    direction: compressionZone.direction,
+    level: compressionZone.patternLabel || "TRIANGLE",
+    price: round(breakoutLevel),
+    setupType: "TRIANGLE_CONTINUATION",
+    description: `${compressionZone.patternLabel || "Triangle"} breakout continuing ${compressionZone.direction.toLowerCase()}`,
+  };
+}
+
+function detectCPRRangeRejectionSetup(candles, cpr, atr, strongCandle) {
+  if (!candles || candles.length < 6 || !cpr) return null;
+
+  const recent = candles.slice(-8);
+  const lastCandle = recent[recent.length - 1];
+  const previousCandle = recent[recent.length - 2];
+  const tolerance = Math.max(atr * 0.25, 6);
+
+  const countUpperRejections = (levelPrice) =>
+    recent.filter((candle) => {
+      const range = Math.max(candle.high - candle.low, 0.01);
+      const body = Math.abs(candle.close - candle.open);
+      const upperWick = candle.high - Math.max(candle.open, candle.close);
+      return (
+        candle.high >= levelPrice - tolerance &&
+        Math.abs(candle.close - levelPrice) <= Math.max(tolerance * 2, range) &&
+        upperWick >= Math.max(body, range * 0.3)
+      );
+    }).length;
+
+  const countLowerRejections = (levelPrice) =>
+    recent.filter((candle) => {
+      const range = Math.max(candle.high - candle.low, 0.01);
+      const body = Math.abs(candle.close - candle.open);
+      const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+      return (
+        candle.low <= levelPrice + tolerance &&
+        Math.abs(candle.close - levelPrice) <= Math.max(tolerance * 2, range) &&
+        lowerWick >= Math.max(body, range * 0.3)
+      );
+    }).length;
+
+  const bcRejections = countUpperRejections(cpr.bc);
+  const tcRejections = countLowerRejections(cpr.tc);
+
+  const bearishContinuation =
+    bcRejections >= MIN_RANGE_REJECTIONS &&
+    lastCandle.close < previousCandle.low + tolerance &&
+    (lastCandle.close < lastCandle.open ||
+      strongCandle?.direction === "BEARISH");
+
+  if (bearishContinuation) {
+    return {
+      direction: "BEARISH",
+      level: "BC",
+      price: cpr.bc,
+      levelSide: "RESISTANCE",
+      rejectionCount: bcRejections,
+      setupType: "CPR_RANGE_REJECTION",
+      description: `BC had ${bcRejections} rejections and bearish continuation`,
+    };
+  }
+
+  const bullishContinuation =
+    tcRejections >= MIN_RANGE_REJECTIONS &&
+    lastCandle.close > previousCandle.high - tolerance &&
+    (lastCandle.close > lastCandle.open ||
+      strongCandle?.direction === "BULLISH");
+
+  if (bullishContinuation) {
+    return {
+      direction: "BULLISH",
+      level: "TC",
+      price: cpr.tc,
+      levelSide: "SUPPORT",
+      rejectionCount: tcRejections,
+      setupType: "CPR_RANGE_REJECTION",
+      description: `TC had ${tcRejections} rejections and bullish continuation`,
+    };
+  }
+
+  return null;
+}
+
 function detectRangeRejectionSetup(
   candles,
   supportResistance,
@@ -1449,11 +1864,7 @@ function detectRangeRejectionSetup(
   atr,
   strongCandle,
 ) {
-  if (
-    !candles ||
-    candles.length < 8 ||
-    !levelInteraction
-  ) {
+  if (!candles || candles.length < 8 || !levelInteraction) {
     return null;
   }
 
@@ -1547,6 +1958,59 @@ function detectRangeRejectionSetup(
       rejectionCount: lowerRejections.length,
       setupType: "RANGE_REJECTION_CONTINUATION",
       description: `${nearestSupportName} range rejection continuation`,
+    };
+  }
+
+  return null;
+}
+
+function detectBreakoutMomentumSetup(
+  candles,
+  breakoutDetected,
+  atr,
+  strongCandle,
+) {
+  if (!candles || candles.length < 3 || !breakoutDetected) return null;
+
+  const lastCandle = candles[candles.length - 1];
+  const previousCandle = candles[candles.length - 2];
+  const levelPrice = breakoutDetected.price;
+  const minimumMove = Math.max(atr * 0.35, 8);
+  const candleRange = Math.max(lastCandle.high - lastCandle.low, 0.01);
+  const candleBody = Math.abs(lastCandle.close - lastCandle.open);
+  const strongBody = candleBody / candleRange >= 0.55;
+
+  const bullishContinuation =
+    breakoutDetected.direction === "BULLISH" &&
+    lastCandle.close > levelPrice + minimumMove &&
+    lastCandle.close >= previousCandle.high - Math.max(atr * 0.15, 3) &&
+    (lastCandle.close > lastCandle.open ||
+      strongCandle?.direction === "BULLISH") &&
+    (strongBody || strongCandle?.isStrong);
+
+  if (bullishContinuation) {
+    return {
+      ...breakoutDetected,
+      detected: true,
+      setupType: "BREAKOUT_MOMENTUM",
+      description: `${breakoutDetected.level} bullish breakout with continuous follow-through`,
+    };
+  }
+
+  const bearishContinuation =
+    breakoutDetected.direction === "BEARISH" &&
+    lastCandle.close < levelPrice - minimumMove &&
+    lastCandle.close <= previousCandle.low + Math.max(atr * 0.15, 3) &&
+    (lastCandle.close < lastCandle.open ||
+      strongCandle?.direction === "BEARISH") &&
+    (strongBody || strongCandle?.isStrong);
+
+  if (bearishContinuation) {
+    return {
+      ...breakoutDetected,
+      detected: true,
+      setupType: "BREAKOUT_MOMENTUM",
+      description: `${breakoutDetected.level} bearish breakdown with continuous follow-through`,
     };
   }
 
@@ -1786,8 +2250,8 @@ function validateRejectionAlignment(rejectionCandle, expectedDirection) {
 function hasStrongRejectionConfirmation(rejectionCandle) {
   return Boolean(
     rejectionCandle?.detected &&
-      rejectionCandle?.strength >= 1.25 &&
-      (rejectionCandle?.wick === "LOWER" || rejectionCandle?.wick === "UPPER"),
+    rejectionCandle?.strength >= 1.25 &&
+    (rejectionCandle?.wick === "LOWER" || rejectionCandle?.wick === "UPPER"),
   );
 }
 

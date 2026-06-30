@@ -29,6 +29,15 @@ function formatPnl(value) {
 }
 
 function formatTargets(trade) {
+  if (trade.optionTargets?.length) {
+    return trade.optionTargets
+      .map(
+        (target, index) =>
+          `T${index + 1}: ${target}${trade.targetsHit?.includes(index) ? " ✅" : ""}`,
+      )
+      .join(" | ");
+  }
+
   if (trade.targets?.length) {
     return trade.targets
       .map(
@@ -58,6 +67,9 @@ async function sendAlert(signal, scoring) {
   const targetsStr = signal.targetPoints?.length
     ? signal.targetPoints.map((pt, i) => `T${i + 1}=+${pt}`).join(" | ")
     : `Target: ${signal.target}`;
+  const optionTargetsStr = signal.optionTargets?.length
+    ? signal.optionTargets.map((target, i) => `T${i + 1}: ${target}`).join(" | ")
+    : null;
 
   const message = `
 ${meta.emoji} *${grade} ${meta.signalLabel}* ${meta.emoji}
@@ -71,12 +83,14 @@ ${tradeType} | ${signal.source || "SIGNAL"}
 💰 *Entry:* ${signal.entry}
 🛑 *Stop Loss:* ${signal.stopLoss} (${grade === "A+" ? "18" : grade === "A" ? "16" : "14"} pts max)
 📈 *Targets:* ${targetsStr}
+${optionTargetsStr ? `📈 *Option Targets:* ${optionTargetsStr}` : ""}
 ⚖️ *R:R* ${signal.riskReward}
 
 *Strikes:*
-ATM: ${signal.strikes?.atm?.strike || "-"}
+ATM: ${signal.strikes?.atm?.strike || "-"}${signal.optionEntry ? ` @ ${signal.optionEntry}` : ""}
 ITM: ${signal.strikes?.itm?.strike || "-"}
 OTM: ${signal.strikes?.otm?.strike || "-"}
+${signal.optionSymbol ? `Option: ${signal.optionSymbol}` : ""}
 
 _${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })}_
 `.trim();
@@ -116,15 +130,12 @@ async function sendTradeUpdateAlert(trade, update = {}) {
             : "🚀 TRAPNEX ENTRY";
 
   const targetSummary = trade.targets?.length
-    ? trade.targets
-        .map(
-          (target, index) =>
-            `🎯 ${target}${trade.targetsHit?.includes(index) ? " ✅" : ""}`,
-        )
-        .join("\n")
-    : trade.target
-      ? `🎯 ${trade.target}`
-      : "🎯 -";
+    ? formatTargets(trade)
+    : trade.optionTargets?.length
+      ? formatTargets(trade)
+      : trade.target
+        ? `🎯 ${trade.target}`
+        : "🎯 -";
 
   const statusLine =
     update.event === "TARGET_HIT" && update.targetIdx === 0

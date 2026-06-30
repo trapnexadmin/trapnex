@@ -214,7 +214,9 @@ function startDemoMode() {
 
   // Run initial analysis with CPR data
   console.log("[Demo] Running initial analysis...");
-  strategyRunner.runAnalysis();
+  strategyRunner.runAnalysis().catch((err) => {
+    console.error("[Demo] Initial analysis error:", err.message);
+  });
 
   // Run analysis every 15 seconds
   strategyRunner.startPeriodicAnalysis(15000);
@@ -230,6 +232,7 @@ async function startLiveMode() {
 
   const feed = FeedFactory.createFeed(platform, config);
   liveFeed = feed; // Store for symbol switching
+  strategyRunner.setOptionDataProvider(feed);
 
   let lastCandleSaveTime = 0;
   let lastCacheTime = 0;
@@ -307,7 +310,7 @@ async function startLiveMode() {
       }
     }
 
-    strategyRunner.runAnalysis();
+    await strategyRunner.runAnalysis();
 
     const state = strategyRunner.getState();
     broadcast("INIT", state);

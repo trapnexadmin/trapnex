@@ -4,6 +4,7 @@
  */
 
 const { analyzeSetup } = require("../services/strategy");
+const { enrichSignalWithOptionPremium } = require("../services/options");
 const {
   sendAlert,
   sendTradeUpdateAlert,
@@ -35,6 +36,11 @@ class StrategyRunner {
     this.marketCloseCheckInterval = null; // Check for market close
     this.tradeClosedAtMarketClose = false; // Track if trade was closed today
     this.dailyPnLSent = false; // Track if daily P&L summary was sent today
+    this.optionDataProvider = null;
+  }
+
+  setOptionDataProvider(provider) {
+    this.optionDataProvider = provider;
   }
 
   setPreviousDayHLC(high, low, close) {
@@ -44,7 +50,9 @@ class StrategyRunner {
     // Immediately run analysis if we have enough 3m candles (faster timeframe)
     if (this.candleBuilder.getCandles("3m").length >= 5) {
       console.log("[Strategy] Running initial analysis with CPR data...");
-      this.runAnalysis();
+      this.runAnalysis().catch((err) => {
+        console.error("[Strategy] Initial analysis error:", err.message);
+      });
     }
   }
 
@@ -127,7 +135,7 @@ class StrategyRunner {
     return { updates, pnlUpdate };
   }
 
-  runAnalysis() {
+  async runAnalysis() {
     if (!this.previousDayHLC) {
       console.log("[Strategy] ⚠ Waiting for previous day HLC data...");
       return null;
@@ -177,7 +185,7 @@ class StrategyRunner {
           const tradeableIcon = sig.tradeable ? "✅" : "⏳";
           const status = sig.tradeable ? "TRADEABLE" : "WATCHLIST";
           console.log(
-            `  ${tradeableIcon} [${idx + 1}] ${sig.source} @ ${sig.level || "CPR"}: ${sig.type} | Entry=${sig.entry} SL=${sig.stopLoss} Target=${sig.target} | RR=${sig.riskReward?.toFixed(2) || "N/A"} | Grade=${sig.grade} Score=${sig.score}/10 | Conf=${(sig.confidence * 100).toFixed(0)}% | Status=${status}`,
+            `  ${tradeableIcon} [${idx + 1}] ${sig.source} @ ${sig.level || "CPR"}: ${sig.type} | Entry=${sig.entry} SL=${sig.stopLoss} Target=${sig.target} | RR=${sig.riskReward?.toFixed(2) || "N/A"} | Grade=${sig.grade} Score=${sig.score}/22 | Conf=${(sig.confidence * 100).toFixed(0)}% | Status=${status}`,
           );
         });
 
@@ -245,9 +253,9 @@ class StrategyRunner {
       Date.now() - this.lastSignalTime > 5 * 60 * 1000 &&
       !this.pnlTracker.getActiveTrade()
     ) {
-      // V3 STRICT: Filter tradeable signals (B+ requires score >= 12)
+      // V3 STRICT: Filter tradeable signals (B+ requires score >= 10)
       const tradeableSignals = analysis.signals.filter(
-        (s) => s.tradeable && s.score >= 12,
+        (s) => s.tradeable && s.score >= 10,
       );
 
       if (tradeableSignals.length > 0) {
@@ -259,7 +267,11 @@ class StrategyRunner {
         );
 
         // Execute the highest scored signal
-        const bestSignal = sortedSignals[0];
+        let bestSignal = sortedSignals[0];
+        bestSignal = await enrichSignalWithOptionPremium(
+          bestSignal,
+          this.optionDataProvider,
+        );
         this.lastSignalTime = Date.now();
 
         // Save signal to MongoDB (async, non-blocking)
@@ -371,7 +383,9 @@ class StrategyRunner {
   startPeriodicAnalysis(intervalMs = 15000) {
     this.stopPeriodicAnalysis();
     this.analysisInterval = setInterval(() => {
-      this.runAnalysis();
+      this.runAnalysis().catch((err) => {
+        console.error("[Strategy] Analysis error:", err.message);
+      });
     }, intervalMs);
     console.log(`[Strategy] Periodic analysis started (${intervalMs}ms)`);
 

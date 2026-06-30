@@ -5,8 +5,8 @@
  * Grade System (V3 STRICT):
  * A+ (16+): Auto-execute (if retest confirmed)
  * A  (13-15): Tradeable signal
- * B+ (12-14): Tradeable (STRICT: requires proper structure)
- * B  (7-11):  Watchlist (alerts only, can upgrade to B+)
+ * B+ (10-12): Tradeable (STRICT: requires proper structure)
+ * B  (7-9):  Watchlist (alerts only, can upgrade to B+)
  * Ignore (<7): Skip
  */
 
@@ -260,7 +260,7 @@ function scoreMarketStructure({
   }
 
   // === V3 STRICT GRADE ASSIGNMENT ===
-  // A+ (16+), A (13-15), B+ (12+), B (7-11), Ignore (<7)
+  // A+ (16+), A (13-15), B+ (10+), B (7-9), Ignore (<7)
 
   let grade;
   let tradeable = false;
@@ -273,7 +273,7 @@ function scoreMarketStructure({
   } else if (score >= 13) {
     grade = "A";
     tradeable = true;
-  } else if (score >= 12) {
+  } else if (score >= 10) {
     grade = "B+";
     tradeable = true; // STRICT: Only with proper structure (enforced in strategy.js)
   } else if (score >= 7) {
