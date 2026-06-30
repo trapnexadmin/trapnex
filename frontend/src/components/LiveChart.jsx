@@ -28,8 +28,7 @@ export default function LiveChart({
         },
         BREAKOUT_WATCH: {
           label: "TRIANGLE BREAKOUT WATCH",
-          className:
-            "bg-cyan-500/10 border border-cyan-400/25 text-cyan-300",
+          className: "bg-cyan-500/10 border border-cyan-400/25 text-cyan-300",
         },
         CONFIRMED_ENTRY: {
           label: "TRIANGLE CONFIRMED ENTRY",
@@ -79,11 +78,11 @@ export default function LiveChart({
           const date = new Date(timestamp * 1000);
           const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in milliseconds
           const istDate = new Date(date.getTime() + istOffset);
-          
-          const hours = istDate.getUTCHours().toString().padStart(2, '0');
-          const minutes = istDate.getUTCMinutes().toString().padStart(2, '0');
-          const seconds = istDate.getUTCSeconds().toString().padStart(2, '0');
-          
+
+          const hours = istDate.getUTCHours().toString().padStart(2, "0");
+          const minutes = istDate.getUTCMinutes().toString().padStart(2, "0");
+          const seconds = istDate.getUTCSeconds().toString().padStart(2, "0");
+
           return `${hours}:${minutes}:${seconds}`;
         },
       },
@@ -235,12 +234,15 @@ export default function LiveChart({
 
       // Draw CPR lines
       if (analysis?.cpr) {
-        const { pivot, tc, bc } = analysis.cpr;
+        const { pivot, tc, bc, upper, lower } = analysis.cpr;
+
+        const chartTC = upper ?? Math.max(tc, bc);
+        const chartBC = lower ?? Math.min(tc, bc);
 
         const cprLines = [
+          { price: chartTC, color: "#8B5CF6", title: "TC" },
           { price: pivot, color: "#3B82F6", title: "P" },
-          { price: tc, color: "#8B5CF6", title: "TC" },
-          { price: bc, color: "#8B5CF6", title: "BC" },
+          { price: chartBC, color: "#8B5CF6", title: "BC" },
         ];
 
         cprLines.forEach(({ price, color, title }) => {
