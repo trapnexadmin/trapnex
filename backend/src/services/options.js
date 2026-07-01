@@ -4,7 +4,13 @@
  */
 
 const STRIKE_INTERVAL = 50;
-const DEFAULT_TARGET_STEP = 12;
+const DEFAULT_OPTION_STOP_LOSS = 12;
+
+const OPTION_TARGET_PROFILES = {
+  'B+': { points: [7, 14, 21, 28], maxTarget: 50 },
+  A: { points: [8, 16, 24, 32, 40], maxTarget: 80 },
+  'A+': { points: [9, 18, 27, 36, 45, 54], maxTarget: 100 },
+};
 
 function getATMStrike(spotPrice) {
   return Math.round(spotPrice / STRIKE_INTERVAL) * STRIKE_INTERVAL;
@@ -30,12 +36,42 @@ function getStrikes(spotPrice, signalType) {
   };
 }
 
+function getOptionTargetProfile(grade) {
+  const normalizedGrade = String(grade || '').toUpperCase();
+  return OPTION_TARGET_PROFILES[normalizedGrade] || OPTION_TARGET_PROFILES['B+'];
+}
+
+function buildOptionTargets(optionEntry, grade, extraTargetCount = 0) {
+  const profile = getOptionTargetProfile(grade);
+  const optionTargetPoints = [...profile.points];
+  const targetStep = optionTargetPoints[0] || DEFAULT_OPTION_STOP_LOSS;
+
+  for (let i = 0; i < extraTargetCount; i += 1) {
+    const lastPoint = optionTargetPoints[optionTargetPoints.length - 1] || 0;
+    optionTargetPoints.push(lastPoint + targetStep);
+  }
+
+  const entry = round(optionEntry);
+
+  return {
+    optionStopLoss: round(entry - DEFAULT_OPTION_STOP_LOSS),
+    optionTargets: optionTargetPoints.map((points) => round(entry + points)),
+    optionTargetPoints,
+    optionTargetProfile: {
+      grade: String(grade || 'B+').toUpperCase(),
+      maxTarget: profile.maxTarget,
+      targetStep,
+    },
+  };
+}
+
 async function enrichSignalWithOptionPremium(signal, provider) {
   if (!signal || !provider?.smartApi) return signal;
 
   const strikes = signal.strikes || getStrikes(signal.entry, signal.type);
   const atmStrike = strikes?.atm?.strike || getATMStrike(signal.entry);
   const optionType = signal.type === 'CALL' ? 'CE' : 'PE';
+  const grade = signal.grade || signal.scoring?.grade || 'B+';
 
   try {
     const optionQuote = await fetchAngelOneOptionQuote(
@@ -46,11 +82,8 @@ async function enrichSignalWithOptionPremium(signal, provider) {
 
     if (!optionQuote?.ltp) return { ...signal, strikes };
 
-    const targetPoints = signal.targetPoints?.length
-      ? signal.targetPoints
-      : [DEFAULT_TARGET_STEP, DEFAULT_TARGET_STEP * 2, DEFAULT_TARGET_STEP * 3];
     const optionEntry = round(optionQuote.ltp);
-    const optionTargets = targetPoints.map((points) => round(optionEntry + points));
+    const optionPlan = buildOptionTargets(optionEntry, grade);
 
     return {
       ...signal,
@@ -64,8 +97,7 @@ async function enrichSignalWithOptionPremium(signal, provider) {
         },
       },
       optionEntry,
-      optionTargets,
-      optionTargetPoints: targetPoints,
+      ...optionPlan,
       optionSymbol: optionQuote.tradingSymbol,
       optionToken: optionQuote.symbolToken,
       optionPremiumSource: 'ANGELONE_MARKET_DATA',
@@ -138,4 +170,11 @@ function round(value) {
   return Math.round(Number(value) * 100) / 100;
 }
 
-module.exports = { getATMStrike, getStrikes, enrichSignalWithOptionPremium };
+module.exports = {
+  getATMStrike,
+  getStrikes,
+  getOptionTargetProfile,
+  buildOptionTargets,
+  fetchAngelOneOptionQuote,
+  enrichSignalWithOptionPremium,
+};

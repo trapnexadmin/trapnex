@@ -5,18 +5,24 @@
 
 function calculateCPR(high, low, close) {
   const pivot = (high + low + close) / 3;
-  const bc = (high + low) / 2;
-  const tc = (2 * pivot) - bc; // Same as: pivot + (pivot - bc)
+  const formulaBc = (high + low) / 2;
+  const formulaTc = (2 * pivot) - formulaBc; // Same as: pivot + (pivot - BC)
+  const upper = Math.max(formulaTc, formulaBc);
+  const lower = Math.min(formulaTc, formulaBc);
 
-  const width = Math.abs(tc - bc);
+  const width = upper - lower;
 
   return {
     pivot: round(pivot),
-    tc: round(tc),
-    bc: round(bc),
+    // Keep strategy, chart, and UI labels structurally ordered:
+    // TC is always the upper CPR boundary, BC is always the lower boundary.
+    tc: round(upper),
+    bc: round(lower),
     width: round(width),
-    upper: round(Math.max(tc, bc)),
-    lower: round(Math.min(tc, bc)),
+    upper: round(upper),
+    lower: round(lower),
+    formulaTc: round(formulaTc),
+    formulaBc: round(formulaBc),
   };
 }
 
@@ -50,8 +56,11 @@ function isNarrowCPR(cpr, atr) {
 }
 
 function getCPRBias(price, cpr) {
-  if (price > cpr.tc) return 'BULLISH';
-  if (price < cpr.bc) return 'BEARISH';
+  const upper = cpr.upper ?? Math.max(cpr.tc, cpr.bc);
+  const lower = cpr.lower ?? Math.min(cpr.tc, cpr.bc);
+
+  if (price > upper) return 'BULLISH';
+  if (price < lower) return 'BEARISH';
   return 'NEUTRAL';
 }
 

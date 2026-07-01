@@ -25,6 +25,9 @@ export default function CPRPanel({ cpr, bias, price, cprWidthDesc }) {
       : bias === 'BEARISH'
       ? 'glow-red'
       : '';
+  const tc = cpr.upper ?? Math.max(cpr.tc, cpr.bc);
+  const bc = cpr.lower ?? Math.min(cpr.tc, cpr.bc);
+  const width = cpr.width ?? Math.abs(tc - bc);
 
   return (
     <div className={`glass p-5 ${biasGlow}`}>
@@ -39,9 +42,9 @@ export default function CPRPanel({ cpr, bias, price, cprWidthDesc }) {
 
       {/* CPR Visual */}
       <div className="space-y-3 mb-4">
-        <CPRLevel label="TC" value={cpr.tc} color="text-brand-purple" price={price} />
+        <CPRLevel label="TC" value={tc} color="text-brand-purple" price={price} />
         <CPRLevel label="Pivot" value={cpr.pivot} color="text-brand-blue" price={price} />
-        <CPRLevel label="BC" value={cpr.bc} color="text-brand-purple" price={price} />
+        <CPRLevel label="BC" value={bc} color="text-brand-purple" price={price} />
       </div>
 
       {/* Width with Description */}
@@ -49,7 +52,7 @@ export default function CPRPanel({ cpr, bias, price, cprWidthDesc }) {
         <div className="flex items-center justify-between">
           <span className="text-xs text-brand-muted">CPR Width</span>
           <span className="text-xs font-mono font-medium text-brand-text">
-            {cpr.width.toFixed(2)}
+            {width.toFixed(2)}
           </span>
         </div>
         

@@ -1,12 +1,18 @@
-import { useState, useEffect } from "react";
+import { BarChart3 } from "lucide-react";
 
-export default function OptionsPanel({ strikes, signalType, currentPrice }) {
+export default function OptionsPanel({
+  strikes,
+  signalType,
+  currentPrice,
+  onOpenOptionChart,
+}) {
   // Show signal-derived strikes only — no mock random data
   const atmStrike = currentPrice ? Math.round(currentPrice / 50) * 50 : null;
 
   const callStrikes = strikes
     ? [strikes.itm, strikes.atm, strikes.otm].filter(Boolean)
     : [];
+  const defaultSide = signalType === "PUT" ? "PE" : "CE";
 
   if (!currentPrice) {
     return (
@@ -51,9 +57,21 @@ export default function OptionsPanel({ strikes, signalType, currentPrice }) {
               {signalType}
             </span>
           )}
-          <span className="text-[10px] text-brand-muted px-1.5 py-0.5 rounded bg-white/5 border border-white/10">
-            Strikes only
-          </span>
+          <button
+            type="button"
+            onClick={() =>
+              onOpenOptionChart?.({
+                strike: atmStrike,
+                optionType: defaultSide,
+                label: "ATM",
+              })
+            }
+            className="h-7 px-2 rounded-lg bg-brand-blue/15 border border-brand-blue/30 text-brand-blue hover:bg-brand-blue/25 transition-colors flex items-center gap-1"
+            title="Open ATM option chart"
+          >
+            <BarChart3 size={13} />
+            <span className="text-[10px] font-semibold">ATM</span>
+          </button>
         </div>
       </div>
 
@@ -65,7 +83,7 @@ export default function OptionsPanel({ strikes, signalType, currentPrice }) {
                 Strike
               </th>
               <th className="px-2 py-2 text-center font-semibold text-brand-muted">
-                Type
+                Chart
               </th>
             </tr>
           </thead>
@@ -100,24 +118,31 @@ export default function OptionsPanel({ strikes, signalType, currentPrice }) {
                   >
                     {row.strike}
                   </td>
-                  <td className="px-2 py-2 text-center">
-                    {row.isATM && (
-                      <span className="text-[10px] text-brand-blue font-semibold">
-                        ATM
-                      </span>
-                    )}
-                    {isSignalStrike && !row.isATM && (
-                      <span
-                        className={`text-[10px] font-semibold ${
-                          signalType === "CALL"
-                            ? "text-brand-green"
-                            : "text-brand-red"
-                        }`}
-                      >
-                        {callStrikes.find((s) => s.strike === row.strike)
-                          ?.type || ""}
-                      </span>
-                    )}
+                  <td className="px-2 py-2">
+                    <div className="flex items-center justify-center gap-1">
+                      <OptionChartButton
+                        label="CE"
+                        color="green"
+                        onClick={() =>
+                          onOpenOptionChart?.({
+                            strike: row.strike,
+                            optionType: "CE",
+                            label: row.isATM ? "ATM" : "STRIKE",
+                          })
+                        }
+                      />
+                      <OptionChartButton
+                        label="PE"
+                        color="red"
+                        onClick={() =>
+                          onOpenOptionChart?.({
+                            strike: row.strike,
+                            optionType: "PE",
+                            label: row.isATM ? "ATM" : "STRIKE",
+                          })
+                        }
+                      />
+                    </div>
                   </td>
                 </tr>
               );
@@ -130,9 +155,28 @@ export default function OptionsPanel({ strikes, signalType, currentPrice }) {
         <span>ATM: {atmStrike}</span>
         <span className="flex items-center gap-1">
           <div className="w-1.5 h-1.5 rounded-full bg-brand-muted" />
-          No live OI
+          Option chart
         </span>
       </div>
     </div>
+  );
+}
+
+function OptionChartButton({ label, color, onClick }) {
+  const classes =
+    color === "green"
+      ? "text-brand-green border-brand-green/25 hover:bg-brand-green/15"
+      : "text-brand-red border-brand-red/25 hover:bg-brand-red/15";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-7 min-w-9 px-2 rounded-lg border bg-white/5 transition-colors inline-flex items-center justify-center gap-1 ${classes}`}
+      title={`Open ${label} option chart`}
+    >
+      <BarChart3 size={12} />
+      <span className="text-[10px] font-bold">{label}</span>
+    </button>
   );
 }

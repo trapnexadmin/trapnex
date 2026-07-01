@@ -47,6 +47,13 @@ const tradeSchema = new mongoose.Schema({
   targets: [Number],    // all target levels array
   targetPoints: [Number], // fixed points array e.g. [25, 50, 75]
   targetsHit: [Number], // which target indices were hit
+  strikes: mongoose.Schema.Types.Mixed,
+  optionEntry: Number,
+  optionStopLoss: Number,
+  optionTargets: [Number],
+  optionTargetPoints: [Number],
+  optionSymbol: String,
+  optionToken: String,
   riskReward: Number,
   pnl: {
     points: { type: Number, default: 0 },

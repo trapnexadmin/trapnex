@@ -306,6 +306,7 @@ class StrategyRunner {
           targets: bestSignal.targets,
           t1: bestSignal.t1,
           targetPoints: bestSignal.targetPoints,
+          strikes: bestSignal.strikes,
         });
 
         // Save trade to MongoDB (async, non-blocking)

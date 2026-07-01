@@ -7,6 +7,7 @@ import SignalCard from "./components/SignalCard";
 import PnLCard from "./components/PnLCard";
 import CPRPanel from "./components/CPRPanel";
 import OptionsPanel from "./components/OptionsPanel";
+import OptionStrikeChart from "./components/OptionStrikeChart";
 import TradeJournal from "./components/TradeJournal";
 import ScoreCard from "./components/ScoreCard";
 import PnLAnalysisPage from "./components/PnLAnalysisPage";
@@ -18,6 +19,7 @@ export default function App() {
   const [timeframe, setTimeframe] = useState("5m");
   const [journal, setJournal] = useState({ trades: [], stats: {} });
   const [showPnLAnalysis, setShowPnLAnalysis] = useState(false);
+  const [optionChartSelection, setOptionChartSelection] = useState(null);
   const lastSignalRef = useRef(null);
   const lastTradeEventRef = useRef(null);
 
@@ -247,9 +249,10 @@ export default function App() {
             />
 
             <OptionsPanel
-              strikes={ws.analysis?.signal?.strikes}
+              strikes={(ws.signal || ws.analysis?.signal)?.strikes}
               signalType={ws.signal?.type || ws.analysis?.signal?.type}
               currentPrice={ws.price}
+              onOpenOptionChart={setOptionChartSelection}
             />
 
             <div className="lg:col-span-2">
@@ -263,6 +266,18 @@ export default function App() {
       <AnimatePresence>
         {showPnLAnalysis && (
           <PnLAnalysisPage onClose={() => setShowPnLAnalysis(false)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {optionChartSelection && (
+          <OptionStrikeChart
+            selection={optionChartSelection}
+            trade={ws.activeTrade}
+            signal={ws.signal || ws.analysis?.signal}
+            currentPrice={ws.price}
+            onClose={() => setOptionChartSelection(null)}
+          />
         )}
       </AnimatePresence>
     </>

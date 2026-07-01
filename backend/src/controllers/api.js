@@ -6,6 +6,10 @@ const express = require('express');
 const router = express.Router();
 const dbService = require('../db/service');
 const { sendTradeClosedSummary } = require('../services/telegram');
+const {
+  fetchAngelOneOptionQuote,
+  buildOptionTargets,
+} = require('../services/options');
 
 function normalizeTrade(trade) {
   if (!trade) return null;
@@ -132,6 +136,45 @@ function createControllers(strategyRunner, journal) {
   router.get('/analysis', (req, res) => {
     const analysis = strategyRunner.lastAnalysis;
     res.json(analysis || { message: 'No analysis yet' });
+  });
+
+  // Resolve live option quote for a selected strike
+  router.get('/option-quote', async (req, res) => {
+    try {
+      const strike = Number(req.query.strike);
+      const optionType = String(req.query.optionType || '').toUpperCase();
+      const grade = String(req.query.grade || req.query.signalGrade || 'B+').toUpperCase();
+
+      if (!Number.isFinite(strike) || strike <= 0) {
+        return res.status(400).json({ error: 'Valid strike required' });
+      }
+
+      if (!['CE', 'PE'].includes(optionType)) {
+        return res.status(400).json({ error: 'Valid optionType required' });
+      }
+
+      const smartApi = strategyRunner.optionDataProvider?.smartApi;
+      if (!smartApi) {
+        return res.status(503).json({ error: 'Option data provider unavailable' });
+      }
+
+      const quote = await fetchAngelOneOptionQuote(smartApi, strike, optionType);
+      if (!quote?.ltp) {
+        return res.status(404).json({ error: 'Option quote not found' });
+      }
+
+      const optionPlan = buildOptionTargets(quote.ltp, grade);
+
+      return res.json({
+        ...quote,
+        optionEntry: quote.ltp,
+        optionSymbol: quote.tradingSymbol,
+        ...optionPlan,
+      });
+    } catch (err) {
+      console.error('[API] Option quote lookup failed:', err.message);
+      return res.status(500).json({ error: 'Failed to resolve option quote' });
+    }
   });
 
   // Get active trade
