@@ -40,6 +40,9 @@ export function useWebSocket() {
     activeTrade: null,
     tradeEvent: null,
     signal: null,
+    decisionTrade: null,
+    optionTrade: null,
+    tradeOptionTrade: null,
     price: 0,
     volume: 0,
     stats: null,
@@ -167,6 +170,10 @@ export function useWebSocket() {
                 analysis: msg.data.analysis,
                 signal: msg.data.analysis?.signal ?? null,
                 activeTrade: msg.data.activeTrade ?? null,
+                decisionTrade: msg.data.activeTrade?.decisionTrade ?? prev.decisionTrade,
+                optionTrade: msg.data.activeTrade?.optionTrade ?? prev.optionTrade,
+                tradeOptionTrade:
+                  msg.data.activeTrade?.tradeOptionTrade ?? prev.tradeOptionTrade,
                 stats: msg.data.stats,
                 price:
                   msg.data.candles?.["1m"]?.slice(-1)[0]?.close || prev.price,
@@ -189,6 +196,10 @@ export function useWebSocket() {
               newData = {
                 ...prev,
                 activeTrade: msg.data.activeTrade ?? null,
+                decisionTrade: msg.data.trade?.decisionTrade ?? prev.decisionTrade,
+                optionTrade: msg.data.trade?.optionTrade ?? prev.optionTrade,
+                tradeOptionTrade:
+                  msg.data.trade?.tradeOptionTrade ?? prev.tradeOptionTrade,
                 tradeEvent: {
                   event: msg.data.event,
                   reason: msg.data.trade?.reason || null,
@@ -207,6 +218,10 @@ export function useWebSocket() {
                 ...prev,
                 analysis: msg.data,
                 signal: msg.data?.signal ?? null,
+                decisionTrade: msg.data?.decisionTrade ?? prev.decisionTrade,
+                optionTrade: msg.data?.optionTrade ?? prev.optionTrade,
+                tradeOptionTrade:
+                  msg.data?.tradeOptionTrade ?? prev.tradeOptionTrade,
               };
               break;
 
@@ -215,6 +230,10 @@ export function useWebSocket() {
                 ...prev,
                 signal: msg.data.signal,
                 analysis: { ...prev.analysis, scoring: msg.data.scoring },
+                decisionTrade: msg.data.signal?.decisionTrade ?? prev.decisionTrade,
+                optionTrade: msg.data.signal?.optionTrade ?? prev.optionTrade,
+                tradeOptionTrade:
+                  msg.data.signal?.tradeOptionTrade ?? prev.tradeOptionTrade,
               };
               break;
 

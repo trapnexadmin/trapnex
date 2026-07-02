@@ -43,6 +43,10 @@ function normalizeTrade(trade) {
     targets: trade.targets ?? [],
     targetPoints: trade.targetPoints ?? [],
     targetsHit: trade.targetsHit ?? [],
+    decisionTrade: trade.decisionTrade ?? null,
+    optionTrade: trade.optionTrade ?? null,
+    tradeOptionTrade: trade.tradeOptionTrade ?? null,
+    passiveMetrics: trade.passiveMetrics ?? trade.metadata?.passive ?? null,
     result:
       trade.result ||
       (pnlPoints > 0 ? 'WIN' : pnlPoints < 0 ? 'LOSS' : null),

@@ -55,6 +55,9 @@ const tradeSchema = new mongoose.Schema({
   optionSymbol: String,
   optionToken: String,
   riskReward: Number,
+  decisionTrade: mongoose.Schema.Types.Mixed,
+  optionTrade: mongoose.Schema.Types.Mixed,
+  tradeOptionTrade: mongoose.Schema.Types.Mixed,
   pnl: {
     points: { type: Number, default: 0 },
     amount:  { type: Number, default: 0 },
@@ -84,6 +87,7 @@ const tradeSchema = new mongoose.Schema({
     platform: String,
     mode: String, // 'LIVE' or 'BACKTEST'
     source: String,
+    passive: mongoose.Schema.Types.Mixed,
   }
 }, {
   timestamps: true,

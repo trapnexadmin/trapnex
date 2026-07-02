@@ -473,7 +473,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       const range = Math.max(candle.high - candle.low, 0.01);
       const lowerWick = Math.min(candle.open, candle.close) - candle.low;
       const upperWick = candle.high - Math.max(candle.open, candle.close);
-      const roundLevel = Math.round(candle.close / ROUND_NUMBER_STEP) * ROUND_NUMBER_STEP;
+      const roundLevel =
+        Math.round(candle.close / ROUND_NUMBER_STEP) * ROUND_NUMBER_STEP;
       const touchedRoundLevel =
         Math.abs(candle.high - roundLevel) <= ROUND_NUMBER_TOLERANCE ||
         Math.abs(candle.low - roundLevel) <= ROUND_NUMBER_TOLERANCE ||
@@ -545,7 +546,9 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
       tradeable: true,
       autoExecute: false,
       breakdown: [
-        ...(Array.isArray(scoringResult?.breakdown) ? scoringResult.breakdown : []),
+        ...(Array.isArray(scoringResult?.breakdown)
+          ? scoringResult.breakdown
+          : []),
         {
           factor: `Round Level ${setup.level}`,
           points: 3,
@@ -1234,7 +1237,8 @@ function analyzeSetup(candles3m, candles5m, candles15m, previousDayHLC) {
         !breakoutMomentumSetup &&
         mtfConfirmed
       ) {
-        const type = roundRejectionSetup.direction === "BULLISH" ? "CALL" : "PUT";
+        const type =
+          roundRejectionSetup.direction === "BULLISH" ? "CALL" : "PUT";
         const entry = lastPrice;
         const levelPrice = roundRejectionSetup.price;
         const roundRejectionScoring = elevateScoringForRoundRejectionSetup(
@@ -2345,5 +2349,6 @@ function detectCPRSROverlap(cpr, sr) {
     (price) => price >= cprLower - buffer && price <= cprUpper + buffer,
   );
 }
+
 
 module.exports = { analyzeSetup };

@@ -124,6 +124,10 @@ function normalizeTradeEventTrade(trade) {
     entryPrice: trade.entry,
     entryTime: trade.openTime ?? trade.timestamp ?? null,
     pnlPercent: trade.pnlPercent ?? 0,
+    decisionTrade: trade.decisionTrade ?? null,
+    optionTrade: trade.optionTrade ?? null,
+    tradeOptionTrade: trade.tradeOptionTrade ?? null,
+    passiveMetrics: trade.passiveMetrics ?? trade.metadata?.passive ?? null,
   };
 }
 

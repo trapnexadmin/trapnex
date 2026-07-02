@@ -12,6 +12,7 @@ const {
   sendDailyPnLSummary,
 } = require("../services/telegram");
 const dbService = require("../db/service");
+const { buildPassiveAnalysisV2 } = require("../services/engines");
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -151,6 +152,18 @@ class StrategyRunner {
       candles15m,
       this.previousDayHLC,
     );
+    const passiveAnalysis = buildPassiveAnalysisV2({
+      analysis,
+      candles3m,
+      candles5m,
+      candles15m,
+      previousDayHLC: this.previousDayHLC,
+    });
+
+    if (passiveAnalysis) {
+      Object.assign(analysis, passiveAnalysis);
+    }
+
     this.lastAnalysis = analysis;
 
     if (analysis) {
