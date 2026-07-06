@@ -1,5 +1,5 @@
 const { buildMarketContext } = require("./contextEngine");
-const { buildLevelSet } = require("./levelEngine");
+const { buildLevels, buildLevelSet, createLevel, detectLevelState, Level, LEVEL_STATES } = require("./levelEngine");
 const { buildPreviousDayProfile } = require("./previousDayEngine");
 const { buildRoundNumberLevels } = require("./roundNumberEngine");
 const { calculateCamarilla } = require("../indicators/camarilla");
@@ -7,6 +7,9 @@ const { buildConfluence } = require("./confluenceEngine");
 const { buildLiquidityContext } = require("./liquidityEngine");
 const { buildMarketPhase } = require("./marketPhaseEngine");
 const { buildEvents } = require("./eventEngine");
+const { buildDecisionEngine } = require("./decisionEngine");
+const { buildStrikeSelection } = require("./strikeSelectionEngine");
+const { buildOptionTrade } = require("./optionTradeBuilder");
 
 function buildPassiveAnalysisV2({
   analysis,
@@ -18,20 +21,24 @@ function buildPassiveAnalysisV2({
   if (!analysis) return null;
 
   const previousDay = buildPreviousDayProfile(previousDayHLC);
-  const levels = buildLevelSet({
-    cpr: analysis.cpr,
-    supportResistance: analysis.supportResistance,
-    previousDay,
-  });
   const camarilla = calculateCamarilla(previousDayHLC);
   const roundNumbers = buildRoundNumberLevels({
     price: analysis.lastPrice,
   });
+  const levelGroups = buildLevels({
+    cpr: analysis.cpr,
+    supportResistance: analysis.supportResistance,
+    previousDay,
+    camarilla,
+    roundNumbers,
+    lastPrice: analysis.lastPrice,
+    previousPrice: candles3m?.[candles3m.length - 2]?.close ?? null,
+  });
   const marketPhase = buildMarketPhase({ candles3m, candles5m, candles15m, analysis });
-  const liquidity = buildLiquidityContext({ candles3m, levels, analysis });
+  const liquidity = buildLiquidityContext({ candles3m, levels: levelGroups.all, analysis });
   const confluence = buildConfluence({
     analysis,
-    levels,
+    levels: levelGroups.all,
     camarilla,
     roundNumbers,
     liquidity,
@@ -64,11 +71,33 @@ function buildPassiveAnalysisV2({
     tradable: Boolean(analysis.scoring?.tradeable),
     trendPhase: marketPhase.phase,
   });
+  const decision = buildDecisionEngine({
+    market: "NIFTY",
+    analysis,
+    context: marketContext,
+    levels: levelGroups,
+    confluence,
+    events,
+    strategy: analysis.strategy || analysis.signal?.source || null,
+  });
+  const strikeSelection = buildStrikeSelection({
+    decision,
+    spotPrice: analysis.lastPrice,
+    symbol: "NIFTY",
+    optionChain: analysis.optionChain || [],
+  });
+  const optionTrade = buildOptionTrade({
+    decision,
+    strikeSelection,
+    quote: analysis.optionQuote || null,
+    analysis,
+  });
 
   return {
     ...analysis,
     previousDay,
-    levels,
+    levels: levelGroups,
+    levelList: levelGroups.all,
     camarilla,
     roundNumbers,
     confluence,
@@ -76,6 +105,9 @@ function buildPassiveAnalysisV2({
     marketPhase,
     events,
     marketContext,
+    decision,
+    strikeSelection,
+    optionTrade,
     passiveMetrics: {
       confidence: confluence.confidence,
       reasons: confluence.reasons,
@@ -87,11 +119,19 @@ function buildPassiveAnalysisV2({
 module.exports = {
   buildMarketContext,
   buildPassiveAnalysisV2,
+  buildLevels,
   buildLevelSet,
+  createLevel,
+  detectLevelState,
+  Level,
+  LEVEL_STATES,
   buildPreviousDayProfile,
   buildRoundNumberLevels,
   buildConfluence,
   buildLiquidityContext,
   buildMarketPhase,
   buildEvents,
+  buildDecisionEngine,
+  buildStrikeSelection,
+  buildOptionTrade,
 };

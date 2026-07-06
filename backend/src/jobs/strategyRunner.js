@@ -4,7 +4,10 @@
  */
 
 const { analyzeSetup } = require("../services/strategy");
-const { enrichSignalWithOptionPremium } = require("../services/options");
+const {
+  enrichSignalWithOptionPremium,
+  fetchAngelOneOptionQuote,
+} = require("../services/options");
 const {
   sendAlert,
   sendTradeUpdateAlert,
@@ -12,12 +15,18 @@ const {
   sendDailyPnLSummary,
 } = require("../services/telegram");
 const dbService = require("../db/service");
-const { buildPassiveAnalysisV2 } = require("../services/engines");
+const {
+  buildPassiveAnalysisV2,
+  buildStrikeSelection,
+  buildOptionTrade,
+} = require("../services/engines");
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 function getISTDateKey(value) {
-  const date = new Date((value ? new Date(value).getTime() : Date.now()) + IST_OFFSET_MS);
+  const date = new Date(
+    (value ? new Date(value).getTime() : Date.now()) + IST_OFFSET_MS,
+  );
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
@@ -77,7 +86,10 @@ class StrategyRunner {
       }).catch(() => {});
     }
 
-    if (pnlUpdate?.event === "CLOSED" && pnlUpdate.trade?.reason === "STOP_LOSS") {
+    if (
+      pnlUpdate?.event === "CLOSED" &&
+      pnlUpdate.trade?.reason === "STOP_LOSS"
+    ) {
       sendTradeUpdateAlert(pnlUpdate.trade, {
         event: "STOP_LOSS",
         currentPrice: tick.price,
@@ -103,11 +115,13 @@ class StrategyRunner {
                   time: new Date(exit.time || pnlUpdate.trade.closeTime),
                   reason: exit.reason || pnlUpdate.trade.reason,
                 }))
-              : [{
-                  price: pnlUpdate.trade.exitPrice,
-                  time: new Date(pnlUpdate.trade.closeTime),
-                  reason: pnlUpdate.trade.reason,
-                }],
+              : [
+                  {
+                    price: pnlUpdate.trade.exitPrice,
+                    time: new Date(pnlUpdate.trade.closeTime),
+                    reason: pnlUpdate.trade.reason,
+                  },
+                ],
             status: "CLOSED",
             result: pnlUpdate.trade.result,
             "pnl.points": pnlUpdate.trade.pnl,
@@ -162,6 +176,42 @@ class StrategyRunner {
 
     if (passiveAnalysis) {
       Object.assign(analysis, passiveAnalysis);
+    }
+
+    if (analysis?.decision) {
+      const strikeSelection = buildStrikeSelection({
+        decision: analysis.decision,
+        spotPrice: analysis.lastPrice,
+        symbol: "NIFTY",
+        optionChain: analysis.optionChain || [],
+      });
+
+      let liveQuote = analysis.optionQuote || null;
+      if (
+        strikeSelection?.strike &&
+        strikeSelection?.optionType &&
+        this.optionDataProvider?.smartApi
+      ) {
+        try {
+          liveQuote = await fetchAngelOneOptionQuote(
+            this.optionDataProvider.smartApi,
+            strikeSelection.strike,
+            strikeSelection.optionType,
+          );
+        } catch (err) {
+          console.warn(
+            `[Strategy] ⚠ Option quote lookup failed: ${err.message}`,
+          );
+        }
+      }
+
+      analysis.strikeSelection = strikeSelection;
+      analysis.optionTrade = buildOptionTrade({
+        decision: analysis.decision,
+        strikeSelection,
+        quote: liveQuote,
+        analysis,
+      });
     }
 
     this.lastAnalysis = analysis;
@@ -256,6 +306,95 @@ class StrategyRunner {
 
     if (this.onAnalysis) {
       this.onAnalysis(analysis);
+    }
+
+    if (analysis?.decision) {
+      console.log(
+        `[Strategy] 🧭 Decision: ${analysis.decision.market} ${analysis.decision.bias} ${analysis.decision.action} | Grade: ${analysis.decision.grade} | Conf: ${analysis.decision.confidence}% | Strategy: ${analysis.decision.strategy}`,
+      );
+    }
+
+    if (
+      analysis?.optionTrade?.ready &&
+      Date.now() - this.lastSignalTime > 5 * 60 * 1000 &&
+      !this.pnlTracker.getActiveTrade()
+    ) {
+      const plan = analysis.optionTrade;
+      this.lastSignalTime = Date.now();
+
+      dbService
+        .saveSignal(plan, analysis, {
+          score: plan.score,
+          grade: plan.grade,
+          breakdown: plan.reasons,
+          tradeable: true,
+        })
+        .then((result) => {
+          if (result.saved) {
+            this.lastSignalId = result.signalId;
+            console.log(
+              `[Strategy] ✓ Option trade saved to MongoDB (ID: ${result.signalId})`,
+            );
+          }
+        })
+        .catch((err) => {
+          console.error(`[Strategy] ✗ Option trade save error:`, err.message);
+        });
+
+      const trade = this.pnlTracker.openTrade({
+        ...plan,
+        score: plan.score,
+        grade: plan.grade,
+        targets: plan.targets,
+        t1: plan.t1,
+        targetPoints: plan.targetPoints,
+        strikes: plan.strikes,
+        decisionTrade: analysis.decision,
+        optionTrade: plan,
+        tradeOptionTrade: plan,
+        strikeSelection: plan.strikeSelection,
+        lifecycle: plan.lifecycle,
+        quantity: plan.quantity,
+        source: "OPTION_TRADE",
+      });
+
+      dbService
+        .saveTrade(trade, this.lastSignalId)
+        .then((result) => {
+          if (result.saved && trade && typeof trade === "object") {
+            trade._dbId = result.tradeId;
+          }
+        })
+        .catch((err) => {
+          console.error(`[Strategy] ✗ Option trade save error:`, err.message);
+        });
+
+      console.log(
+        `[Strategy] 🎯 Executing option trade: ${plan.symbol} | Entry=${plan.entry} SL=${plan.stopLoss} RR=1:${plan.rr || "N/A"} Qty=${plan.quantity} | Grade: ${plan.grade}`,
+      );
+
+      if (this.onSignal) {
+        this.onSignal(plan, {
+          score: plan.score,
+          grade: plan.grade,
+          breakdown: plan.reasons,
+          tradeable: true,
+        });
+      }
+
+      sendAlert(plan, {
+        score: plan.score,
+        grade: plan.grade,
+        breakdown: plan.reasons,
+      }).catch(() => {});
+
+      return {
+        signal: plan,
+        decision: analysis.decision || null,
+        optionTrade: plan,
+        trade,
+        allSignals: analysis.signals,
+      };
     }
 
     // Generate signals (throttle: min 5 min between signals)
@@ -387,11 +526,21 @@ class StrategyRunner {
           breakdown: bestSignal.breakdown,
         }).catch(() => {});
 
-        return { signal: bestSignal, trade, allSignals: analysis.signals };
+        return {
+          signal: bestSignal,
+          decision: analysis.decision || null,
+          optionTrade: analysis.optionTrade || null,
+          trade,
+          allSignals: analysis.signals,
+        };
       }
     }
 
-    return { analysis };
+    return {
+      analysis,
+      decision: analysis.decision || null,
+      optionTrade: analysis.optionTrade || null,
+    };
   }
 
   startPeriodicAnalysis(intervalMs = 15000) {
@@ -471,10 +620,14 @@ class StrategyRunner {
           : this.journal.trades || [];
         const todayKey = getISTDateKey(Date.now());
         const todayTrades = history.filter((t) => {
-          const tradeKey = getISTDateKey(t.closeTime || t.openTime || t.createdAt || t.timestamp);
+          const tradeKey = getISTDateKey(
+            t.closeTime || t.openTime || t.createdAt || t.timestamp,
+          );
           return tradeKey === todayKey;
         });
-        const stats = this.journal.getStats ? this.journal.getStats() : this.pnlTracker.getStats();
+        const stats = this.journal.getStats
+          ? this.journal.getStats()
+          : this.pnlTracker.getStats();
         sendDailyPnLSummary(stats, todayTrades).catch(() => {});
       }
 

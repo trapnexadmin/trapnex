@@ -183,12 +183,18 @@ export default function OptionStrikeChart({
     setQuoteError(null);
 
     fetch(
-      `/api/option-quote?strike=${encodeURIComponent(strike)}&optionType=${encodeURIComponent(optionType)}&grade=${encodeURIComponent(grade)}`,
+      `/api/option-quote?strike=${encodeURIComponent(strike)}&optionType=${encodeURIComponent(optionType)}&grade=${encodeURIComponent(grade)}${selection?.tradingSymbol || trade?.tradingSymbol || signal?.tradingSymbol ? `&tradingSymbol=${encodeURIComponent(selection?.tradingSymbol || trade?.tradingSymbol || signal?.tradingSymbol)}` : ''}`,
       { signal: controller.signal },
     )
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
+          if (response.status === 404 || response.status === 503) {
+            setRemoteQuote(payload);
+            setQuoteError(null);
+            return;
+          }
+
           throw new Error(payload?.error || "Failed to resolve option quote");
         }
 
@@ -427,12 +433,18 @@ export default function OptionStrikeChart({
                 {quoteLoading
                   ? "Loading option premium..."
                   : quoteError
-                    ? "Option quote unavailable."
-                    : "Waiting for ATM option premium..."}
+                    ? "Waiting for live option premium..."
+                    : remoteQuote?.status === "UNAVAILABLE"
+                      ? "Live option premium unavailable right now."
+                      : "Waiting for ATM option premium..."}
               </div>
               {quoteError ? (
                 <div className="text-xs text-brand-red max-w-md">
                   {quoteError}
+                </div>
+              ) : remoteQuote?.reason ? (
+                <div className="text-xs text-brand-muted max-w-md">
+                  {remoteQuote.reason}
                 </div>
               ) : null}
             </div>

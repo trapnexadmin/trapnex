@@ -40,6 +40,7 @@ export function useWebSocket() {
     activeTrade: null,
     tradeEvent: null,
     signal: null,
+    decision: null,
     decisionTrade: null,
     optionTrade: null,
     tradeOptionTrade: null,
@@ -169,6 +170,7 @@ export function useWebSocket() {
                 candles: msg.data.candles || prev.candles,
                 analysis: msg.data.analysis,
                 signal: msg.data.analysis?.signal ?? null,
+                decision: msg.data.analysis?.decision ?? null,
                 activeTrade: msg.data.activeTrade ?? null,
                 decisionTrade: msg.data.activeTrade?.decisionTrade ?? prev.decisionTrade,
                 optionTrade: msg.data.activeTrade?.optionTrade ?? prev.optionTrade,
@@ -218,6 +220,7 @@ export function useWebSocket() {
                 ...prev,
                 analysis: msg.data,
                 signal: msg.data?.signal ?? null,
+                decision: msg.data?.decision ?? prev.decision,
                 decisionTrade: msg.data?.decisionTrade ?? prev.decisionTrade,
                 optionTrade: msg.data?.optionTrade ?? prev.optionTrade,
                 tradeOptionTrade:
@@ -230,6 +233,7 @@ export function useWebSocket() {
                 ...prev,
                 signal: msg.data.signal,
                 analysis: { ...prev.analysis, scoring: msg.data.scoring },
+                decision: msg.data.decision ?? prev.decision,
                 decisionTrade: msg.data.signal?.decisionTrade ?? prev.decisionTrade,
                 optionTrade: msg.data.signal?.optionTrade ?? prev.optionTrade,
                 tradeOptionTrade:

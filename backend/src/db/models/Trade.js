@@ -48,6 +48,9 @@ const tradeSchema = new mongoose.Schema({
   targetPoints: [Number], // fixed points array e.g. [25, 50, 75]
   targetsHit: [Number], // which target indices were hit
   strikes: mongoose.Schema.Types.Mixed,
+  strikeSelection: mongoose.Schema.Types.Mixed,
+  decision: mongoose.Schema.Types.Mixed,
+  optionTrade: mongoose.Schema.Types.Mixed,
   optionEntry: Number,
   optionStopLoss: Number,
   optionTargets: [Number],
@@ -55,8 +58,8 @@ const tradeSchema = new mongoose.Schema({
   optionSymbol: String,
   optionToken: String,
   riskReward: Number,
+  lifecycle: String,
   decisionTrade: mongoose.Schema.Types.Mixed,
-  optionTrade: mongoose.Schema.Types.Mixed,
   tradeOptionTrade: mongoose.Schema.Types.Mixed,
   pnl: {
     points: { type: Number, default: 0 },
@@ -120,6 +123,7 @@ tradeSchema.statics.getStats = async function(filter = {}) {
   const totalPnL = trades.reduce((sum, t) => sum + (t.pnl?.points || 0), 0);
   const maxProfit = Math.max(...trades.map(t => t.pnl?.points || 0));
   const maxLoss = Math.min(...trades.map(t => t.pnl?.points || 0));
+  const maxDrawdown = computeMaxDrawdown(trades);
 
   return {
     totalTrades: trades.length,
@@ -130,8 +134,44 @@ tradeSchema.statics.getStats = async function(filter = {}) {
     avgPnL: totalPnL / trades.length,
     bestTrade: maxProfit,
     worstTrade: maxLoss,
-    maxDrawdown: Math.abs(maxLoss),
+    maxDrawdown,
   };
 };
+
+function computeMaxDrawdown(trades) {
+  if (!Array.isArray(trades) || trades.length === 0) return 0;
+
+  const orderedTrades = [...trades].sort((left, right) => {
+    const leftTime = getTradeSortTime(left);
+    const rightTime = getTradeSortTime(right);
+    return leftTime - rightTime;
+  });
+
+  let equity = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+
+  for (const trade of orderedTrades) {
+    equity += Number(trade.pnl?.points || 0);
+    if (equity > peak) peak = equity;
+
+    const drawdown = peak - equity;
+    if (drawdown > maxDrawdown) {
+      maxDrawdown = drawdown;
+    }
+  }
+
+  return round(maxDrawdown);
+}
+
+function getTradeSortTime(trade) {
+  const value = trade?.exit?.time || trade?.closeTime || trade?.entry?.time || trade?.createdAt || trade?.timestamp || 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function round(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
 
 module.exports = mongoose.model('Trade', tradeSchema);

@@ -37,6 +37,9 @@ class PnLTracker {
       targets,
       targetPoints: trade.targetPoints || [],
       strikes: trade.strikes || {},
+      strikeSelection: trade.strikeSelection || null,
+      decision: trade.decision || null,
+      optionTrade: trade.optionTrade || null,
       optionEntry: trade.optionEntry ?? null,
       optionStopLoss: trade.optionStopLoss ?? null,
       optionTargets: trade.optionTargets || [],
@@ -66,6 +69,7 @@ class PnLTracker {
           ? trade.positionSize
           : Math.max(0, 100 - targetsHit.length * 20),
       trailActive: Boolean(trade.trailActive || trade.stopLoss !== trade.initialSL),
+      lifecycle: trade.lifecycle || trade.status || "OPEN",
       signalId: trade.signalId || null,
       createdAt: trade.createdAt || null,
       updatedAt: trade.updatedAt || null,
@@ -83,6 +87,9 @@ class PnLTracker {
     targets,
     targetPoints,
     strikes,
+    strikeSelection,
+    decision,
+    optionTrade,
     optionEntry,
     optionStopLoss,
     optionTargets,
@@ -95,6 +102,8 @@ class PnLTracker {
     source,
     level,
     levelPrice,
+    lifecycle,
+    quantity,
   }) {
     if (this.activeTrade) return null;
 
@@ -114,6 +123,9 @@ class PnLTracker {
       targets: allTargets, // array of all targets
       targetPoints: targetPoints || [],
       strikes: strikes || {},
+      strikeSelection: strikeSelection || null,
+      decision: decision || null,
+      optionTrade: optionTrade || null,
       optionEntry: optionEntry ?? null,
       optionStopLoss: optionStopLoss ?? null,
       optionTargets: optionTargets || [],
@@ -125,6 +137,8 @@ class PnLTracker {
       source,
       level,
       levelPrice,
+      lifecycle: lifecycle || "OPEN",
+      quantity: typeof quantity === "number" ? quantity : 1,
       openTime: timestamp || Date.now(),
       currentPrice: entry,
       pnl: 0,

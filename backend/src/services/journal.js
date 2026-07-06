@@ -39,6 +39,7 @@ class TradeJournal {
     const wins = this.trades.filter((t) => t.result === 'WIN');
     const losses = this.trades.filter((t) => t.result === 'LOSS');
     const totalPnl = this.trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const maxDrawdown = computeMaxDrawdown(this.trades);
 
     const sorted = [...this.trades].sort((a, b) => (b.pnl || 0) - (a.pnl || 0));
 
@@ -61,9 +62,30 @@ class TradeJournal {
       avgPnl: round(totalPnl / this.trades.length),
       bestTrade: sorted[0] || null,
       worstTrade: sorted[sorted.length - 1] || null,
+      maxDrawdown,
       byGrade,
     };
   }
+}
+
+function computeMaxDrawdown(trades) {
+  if (!Array.isArray(trades) || trades.length === 0) return 0;
+
+  let equity = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+
+  for (const trade of trades) {
+    equity += Number(trade.pnl || 0);
+    if (equity > peak) peak = equity;
+
+    const drawdown = peak - equity;
+    if (drawdown > maxDrawdown) {
+      maxDrawdown = drawdown;
+    }
+  }
+
+  return round(maxDrawdown);
 }
 
 function round(val) {

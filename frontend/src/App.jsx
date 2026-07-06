@@ -3,11 +3,13 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import Header from "./components/Header";
 import MarketStatusBanner from "./components/MarketStatusBanner";
 import LiveChart from "./components/LiveChart";
+import DecisionCard from "./components/DecisionCard";
 import SignalCard from "./components/SignalCard";
 import PnLCard from "./components/PnLCard";
 import CPRPanel from "./components/CPRPanel";
 import OptionsPanel from "./components/OptionsPanel";
 import OptionStrikeChart from "./components/OptionStrikeChart";
+import OptionTradeCard from "./components/OptionTradeCard";
 import TradeJournal from "./components/TradeJournal";
 import ScoreCard from "./components/ScoreCard";
 import PnLAnalysisPage from "./components/PnLAnalysisPage";
@@ -17,11 +19,18 @@ import soundManager from "./utils/soundManager";
 export default function App() {
   const ws = useWebSocket();
   const [timeframe, setTimeframe] = useState("5m");
+  const [viewMode, setViewMode] = useState("MAIN");
   const [journal, setJournal] = useState({ trades: [], stats: {} });
   const [showPnLAnalysis, setShowPnLAnalysis] = useState(false);
   const [optionChartSelection, setOptionChartSelection] = useState(null);
   const lastSignalRef = useRef(null);
   const lastTradeEventRef = useRef(null);
+  const optionTrade = ws.analysis?.optionTrade || ws.optionTrade || null;
+  const decision = ws.analysis?.decision || null;
+
+  const handleOpenOptionChart = useCallback((selection) => {
+    setOptionChartSelection(selection || ws.analysis?.strikeSelection || optionTrade?.strikeSelection || null);
+  }, [optionTrade?.strikeSelection, ws.analysis?.strikeSelection]);
 
   const handleSymbolChange = useCallback(
     (symbol) => {
@@ -192,23 +201,81 @@ export default function App() {
         <MarketStatusBanner connected={ws.connected} />
 
         <main className="max-w-[1920px] mx-auto px-4 pb-6 pt-2">
-          {/* Top Row: Chart + Signal */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex rounded-xl border border-brand-border bg-brand-card/70 p-1 shadow-lg">
+              {[
+                { id: "MAIN", label: "Main" },
+                { id: "OPTION", label: "Option" },
+                { id: "REPLAY", label: "Replay" },
+                { id: "JOURNAL", label: "Journal" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setViewMode(tab.id)}
+                  className={`rounded-lg px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    viewMode === tab.id
+                      ? "bg-brand-blue/15 text-brand-blue border border-brand-blue/25"
+                      : "text-brand-muted hover:text-brand-text"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs font-mono text-brand-muted">
+              {decision
+                ? `${decision.market} ${decision.bias} ${decision.action} ${decision.confidence}%`
+                : "Waiting for decision"}
+            </div>
+          </div>
+
+          {/* Top Row: Chart + Decision */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
             {/* Chart - takes 3 cols */}
             <div className="lg:col-span-3">
-              <LiveChart
-                candles={ws.candles[timeframe] || []}
-                timeframe={timeframe}
-                onTimeframeChange={setTimeframe}
-                analysis={ws.analysis}
-                closingSeconds={ws.closingSeconds || 0}
-              />
+              {viewMode === "OPTION" ? (
+                <OptionStrikeChart
+                  selection={ws.analysis?.strikeSelection || optionChartSelection}
+                  trade={ws.activeTrade || optionTrade}
+                  signal={optionTrade || ws.analysis?.signal || ws.signal}
+                  currentPrice={ws.price}
+                  onClose={() => setViewMode("MAIN")}
+                />
+              ) : viewMode === "REPLAY" ? (
+                <TradingViewWidget symbol="NSE:NIFTY" interval="1" height={650} />
+              ) : viewMode === "JOURNAL" ? (
+                <div className="glass p-4 h-full min-h-[650px] overflow-hidden">
+                  <TradeJournal trades={journal.trades} stats={journal.stats} />
+                </div>
+              ) : (
+                <LiveChart
+                  candles={ws.candles[timeframe] || []}
+                  timeframe={timeframe}
+                  onTimeframeChange={setTimeframe}
+                  analysis={ws.analysis}
+                  closingSeconds={ws.closingSeconds || 0}
+                />
+              )}
             </div>
 
             {/* Right Sidebar */}
             <div className="flex flex-col gap-4">
               <AnimatePresence mode="wait">
-                {ws.analysis?.signal || ws.signal ? (
+                {decision ? (
+                  <motion.div
+                    key="signal"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                  >
+                    <DecisionCard
+                      decision={decision}
+                      strikeSelection={ws.analysis?.strikeSelection}
+                      onOpenOptionChart={() => handleOpenOptionChart(ws.analysis?.strikeSelection || optionTrade?.strikeSelection)}
+                    />
+                  </motion.div>
+                ) : ws.analysis?.signal || ws.signal ? (
                   <motion.div
                     key="signal"
                     initial={{ opacity: 0, y: 20 }}
@@ -231,6 +298,11 @@ export default function App() {
                 )}
               </AnimatePresence>
 
+              <OptionTradeCard
+                optionTrade={optionTrade}
+                onOpenOptionChart={() => handleOpenOptionChart(optionTrade?.strikeSelection || ws.analysis?.strikeSelection)}
+              />
+
               <PnLCard
                 trade={ws.activeTrade}
                 onExitAllPositions={handleExitAllPositions}
@@ -249,10 +321,10 @@ export default function App() {
             />
 
             <OptionsPanel
-              strikes={(ws.signal || ws.analysis?.signal)?.strikes}
-              signalType={ws.signal?.type || ws.analysis?.signal?.type}
+              strikes={optionTrade?.strikes || (ws.signal || ws.analysis?.signal)?.strikes}
+              signalType={optionTrade?.type || ws.signal?.type || ws.analysis?.signal?.type}
               currentPrice={ws.price}
-              onOpenOptionChart={setOptionChartSelection}
+              onOpenOptionChart={handleOpenOptionChart}
             />
 
             <div className="lg:col-span-2">
@@ -273,8 +345,8 @@ export default function App() {
         {optionChartSelection && (
           <OptionStrikeChart
             selection={optionChartSelection}
-            trade={ws.activeTrade}
-            signal={ws.signal || ws.analysis?.signal}
+            trade={ws.activeTrade || optionTrade}
+            signal={optionTrade || ws.signal || ws.analysis?.signal}
             currentPrice={ws.price}
             onClose={() => setOptionChartSelection(null)}
           />

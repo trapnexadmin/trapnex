@@ -108,14 +108,15 @@ async function enrichSignalWithOptionPremium(signal, provider) {
   }
 }
 
-async function fetchAngelOneOptionQuote(smartApi, strike, optionType) {
+async function fetchAngelOneOptionQuote(smartApi, strike, optionType, tradingSymbol = null) {
   if (!smartApi?.searchScrip || !smartApi?.marketData) return null;
 
   const searchTerms = [
+    ...buildNiftyOptionSearchTerms(strike, optionType, tradingSymbol),
     `NIFTY ${strike} ${optionType}`,
     `NIFTY${strike}${optionType}`,
     `${strike}${optionType}`,
-  ];
+  ].filter(Boolean);
 
   for (const term of searchTerms) {
     const searchResult = await smartApi.searchScrip({
@@ -123,7 +124,7 @@ async function fetchAngelOneOptionQuote(smartApi, strike, optionType) {
       searchscrip: term,
     });
     const matches = Array.isArray(searchResult) ? searchResult : searchResult?.data;
-    const selected = selectOptionMatch(matches, strike, optionType);
+    const selected = selectOptionMatch(matches, strike, optionType, tradingSymbol);
 
     if (!selected?.symboltoken) continue;
 
@@ -135,7 +136,7 @@ async function fetchAngelOneOptionQuote(smartApi, strike, optionType) {
     });
 
     const fetched = marketData?.data?.fetched?.[0];
-    const ltp = Number(fetched?.ltp);
+    const ltp = Number(fetched?.ltp ?? fetched?.lastPrice ?? fetched?.close ?? fetched?.price);
     if (!Number.isFinite(ltp) || ltp <= 0) continue;
 
     return {
@@ -151,10 +152,73 @@ async function fetchAngelOneOptionQuote(smartApi, strike, optionType) {
   return null;
 }
 
-function selectOptionMatch(matches, strike, optionType) {
+function buildNiftyOptionSearchTerms(strike, optionType, tradingSymbol = null) {
+  const normalizedType = String(optionType || '').toUpperCase();
+  const terms = [];
+
+  if (tradingSymbol) {
+    terms.push(tradingSymbol);
+  }
+
+  for (const expiry of getUpcomingNiftyWeeklyExpiries(3)) {
+    terms.push(`NIFTY${expiry}${strike}${normalizedType}`);
+  }
+
+  return terms;
+}
+
+function getUpcomingNiftyWeeklyExpiries(count = 3, referenceDate = new Date()) {
+  const result = [];
+  const istNow = new Date(referenceDate.getTime() + 5.5 * 60 * 60 * 1000);
+  const istDay = istNow.getUTCDay();
+  const daysUntilThursday = (4 - istDay + 7) % 7;
+  const firstExpiryOffset = daysUntilThursday === 0 ? 0 : daysUntilThursday;
+
+  for (let index = 0; index < count; index += 1) {
+    const expiry = new Date(istNow);
+    expiry.setUTCDate(expiry.getUTCDate() + firstExpiryOffset + index * 7);
+    result.push(formatNiftyExpiry(expiry));
+  }
+
+  return result;
+}
+
+function formatNiftyExpiry(date) {
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = [
+    'JAN',
+    'FEB',
+    'MAR',
+    'APR',
+    'MAY',
+    'JUN',
+    'JUL',
+    'AUG',
+    'SEP',
+    'OCT',
+    'NOV',
+    'DEC',
+  ][date.getUTCMonth()];
+  const year = String(date.getUTCFullYear()).slice(-2);
+
+  return `${day}${month}${year}`;
+}
+
+function selectOptionMatch(matches, strike, optionType, tradingSymbol = null) {
   if (!Array.isArray(matches)) return null;
 
   const strikeText = String(strike);
+  const exactSymbol = tradingSymbol ? String(tradingSymbol).toUpperCase() : null;
+
+  if (exactSymbol) {
+    const exactMatch = matches.find((item) => {
+      const symbol = String(item.tradingsymbol || item.tradingSymbol || '').toUpperCase();
+      return symbol === exactSymbol;
+    });
+
+    if (exactMatch) return exactMatch;
+  }
+
   return matches.find((item) => {
     const symbol = String(item.tradingsymbol || item.tradingSymbol || '').toUpperCase();
     return (
